@@ -1,6 +1,13 @@
 # Browser automation and page interaction.
 from playwright.sync_api import sync_playwright
 
+from agent.security.policy import (
+    MAX_ACTIONS_PER_TASK,
+    MAX_REPLANS_PER_TASK,
+    MAX_TASK_RUNTIME_SECONDS,
+    is_action_allowed,
+)
+
 # Browser perception modules.
 from agent.perception.dom import get_dom_elements
 
@@ -24,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import time
 
 
 # Local Ollama configuration.
@@ -59,6 +67,7 @@ def configure_tesseract():
         "Tesseract OCR not found. Install Tesseract and add it to PATH."
     )
 
+
 # Infer deterministic constraints from explicit task wording.
 def infer_task_constraint(user_goal, elements):
     goal = user_goal.strip()
@@ -93,10 +102,46 @@ def infer_task_constraint(user_goal, elements):
             "target": requested_target,
         }
 
+    type_match = re.match(
+        r'^\s*type\s+["\'](.+?)["\']\s+into\s+(.+?)\s*$',
+        goal,
+        re.IGNORECASE,
+    )
+
+    if type_match:
+        value = type_match.group(1)
+        requested_target = type_match.group(2).strip()
+
+        for element in elements:
+            if element.get("type") not in {"input", "textarea"}:
+                continue
+
+            candidates = [
+                element.get("placeholder", ""),
+                element.get("aria_label", ""),
+                element.get("name", ""),
+                element.get("id", ""),
+            ]
+
+            for candidate in candidates:
+                if candidate and candidate.strip().lower() == requested_target.lower():
+                    return {
+                        "intent": "type_only",
+                        "target": candidate.strip(),
+                        "value": value,
+                    }
+
+        return {
+            "intent": "type_only",
+            "target": requested_target,
+            "value": value,
+        }
+
     return {
         "intent": "general",
         "target": "",
     }
+
 
 # Send only sanitized webpage context and explicit task constraints to the local AI planner.
 def ask_ollama(user_goal, elements, task_constraint):
@@ -367,6 +412,76 @@ def execute_type(page, target, value):
     return False
 
 
+# Verify that a browser action produced the expected result.
+def verify_action(page, action):
+    action_type = action.get("action")
+    target = action.get("target", "")
+
+    if action_type == "type":
+        value = action.get("value", "")
+        locators = [page.locator("input"), page.locator("textarea")]
+
+        for locator in locators:
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                try:
+                    candidates = [
+                        element.get_attribute("placeholder") or "",
+                        element.get_attribute("aria-label") or "",
+                        element.get_attribute("name") or "",
+                        element.get_attribute("id") or "",
+                    ]
+
+                    if any(
+                        candidate.lower() == target.lower()
+                        for candidate in candidates
+                        if candidate
+                    ):
+                        actual_value = element.input_value()
+                        return actual_value == value
+
+                except Exception:
+                    continue
+
+        return False
+
+    if action_type == "click":
+        # Confirm that the clicked target remains a valid clickable element after execution.
+        locators = [page.locator("button"), page.locator("a")]
+
+        for locator in locators:
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                try:
+                    text = (
+                        element.inner_text().strip()
+                        or element.get_attribute("aria-label")
+                        or ""
+                    )
+
+                    if text.lower() == target.lower():
+                        return element.is_visible() and element.is_enabled()
+
+                except Exception:
+                    continue
+
+        return True
+
+    return False
+
+
+# Re-perceive the page after an action.
+def reperceive_page(page):
+    elements = get_dom_elements(page)
+    ocr_text = get_ocr_text(page)
+    privacy_findings = inspect_page(elements)
+    safe_elements = sanitize_page(elements, privacy_findings)
+
+    return elements, ocr_text, privacy_findings, safe_elements
+
+
 # Run the complete perception, privacy, planning, validation, and execution pipeline.
 def main():
     configure_tesseract()
@@ -500,6 +615,27 @@ def main():
 
             actions[0]["target"] = task_constraint["target"]
 
+        # Enforce explicit type-only intent after model generation.
+        if task_constraint["intent"] == "type_only":
+            if len(actions) != 1:
+                print("\nACTION POLICY FAILED")
+                print("-" * 72)
+                print("Type-only task must contain exactly one action.")
+                print("-" * 72)
+                browser.close()
+                return
+
+            if actions[0].get("action") != "type":
+                print("\nACTION POLICY FAILED")
+                print("-" * 72)
+                print("Type-only task must contain exactly one TYPE action.")
+                print("-" * 72)
+                browser.close()
+                return
+
+            actions[0]["target"] = task_constraint["target"]
+            actions[0]["value"] = task_constraint["value"]
+
         # Validation: prevent invalid or unsafe model actions from reaching the browser.
         valid, validation_errors = validate_actions(
             actions,
@@ -562,20 +698,44 @@ def main():
 
         print("-" * 72)
 
-        # Execution: perform only actions that passed validation.
+        # Execution: perform validated actions and verify each result.
         all_success = True
+        action_count = 0
+        replan_count = 0
+        task_start_time = time.monotonic()
 
         for number, action in enumerate(
             actions,
             start=1
         ):
-            action_type = action.get(
-                "action"
-            )
+            # Enforce task runtime limit.
+            elapsed = time.monotonic() - task_start_time
+            if elapsed > MAX_TASK_RUNTIME_SECONDS:
+                print(
+                    f"SECURITY STOP: Task runtime limit reached "
+                    f"({MAX_TASK_RUNTIME_SECONDS}s)."
+                )
+                all_success = False
+                break
 
-            target = action.get(
-                "target"
-            )
+            # Enforce action count limit.
+            if action_count >= MAX_ACTIONS_PER_TASK:
+                print(
+                    f"SECURITY STOP: Maximum action limit reached "
+                    f"({MAX_ACTIONS_PER_TASK})."
+                )
+                all_success = False
+                break
+
+            # Enforce action capability policy.
+            allowed, reason = is_action_allowed(action)
+
+            if not allowed:
+                print(f"SECURITY BLOCK: {reason}")
+                all_success = False
+                break
+            action_type = action.get("action")
+            target = action.get("target")
 
             print(
                 f"\nSTEP "
@@ -583,14 +743,12 @@ def main():
             )
 
             if action_type == "click":
-
                 success = execute_click(
                     page,
                     target
                 )
 
             elif action_type == "type":
-
                 value = action.get(
                     "value",
                     ""
@@ -603,31 +761,65 @@ def main():
                 )
 
             else:
-
                 print(
                     f"Unsupported action: "
                     f"{action_type}"
                 )
-
                 success = False
 
             if not success:
-
                 print(
-                    f"Step {number} failed."
+                    f"Step {number} failed during execution."
                 )
-
                 all_success = False
-
                 break
+
+            # Count successfully executed actions.
+            action_count += 1
 
             print(
                 f"Step {number} completed."
             )
 
-            page.wait_for_timeout(
-                1000
+            page.wait_for_timeout(500)
+
+            # Verify the action before continuing.
+            verified = verify_action(
+                page,
+                action
             )
+
+            if verified:
+                print(
+                    f"Step {number} verification passed."
+                )
+            else:
+                print(
+                    f"Step {number} verification failed."
+                )
+                all_success = False
+                break
+
+            # Re-perceive the webpage after every successful action.
+            print(
+                "Re-perceiving webpage..."
+            )
+
+            elements, ocr_text, privacy_findings, safe_elements = (
+                reperceive_page(page)
+            )
+
+            print(
+                f"Perception updated: "
+                f"{len(elements)} UI element(s)."
+            )
+
+        # Result: report security counters before task status.
+        print(
+            f"Security counters: actions={action_count}, "
+            f"replans={replan_count}, "
+            f"runtime={time.monotonic() - task_start_time:.2f}s"
+        )
 
         # Result: report whether the complete task succeeded.
         print("\n" + "=" * 72)
