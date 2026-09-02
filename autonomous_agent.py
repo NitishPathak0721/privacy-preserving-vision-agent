@@ -1,4 +1,5 @@
 from playwright.sync_api import sync_playwright
+from agent.perception.dom import get_dom_elements
 from PIL import Image
 import pytesseract
 import requests
@@ -8,8 +9,12 @@ import os
 import re
 import shutil
 
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.2:3b"
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEST_PAGE = os.path.join(BASE_DIR, "demo", "test_page.html")
 
 
 def configure_tesseract():
@@ -17,7 +22,7 @@ def configure_tesseract():
 
     if tesseract_path:
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        print(f"Tesseract found: {tesseract_path}")
+        print(f"Tesseract: {tesseract_path}")
         return
 
     windows_paths = [
@@ -28,16 +33,12 @@ def configure_tesseract():
     for path in windows_paths:
         if os.path.exists(path):
             pytesseract.pytesseract.tesseract_cmd = path
-            print(f"Tesseract found: {path}")
+            print(f"Tesseract: {path}")
             return
 
     raise RuntimeError(
-        "Tesseract OCR not found.\n"
-        "Install Tesseract and make sure it is available in PATH."
+        "Tesseract OCR not found. Install Tesseract and add it to PATH."
     )
-
-
-configure_tesseract()
 
 
 def ask_ollama(user_goal, elements):
@@ -56,14 +57,12 @@ of browser actions.
 Allowed actions:
 
 CLICK:
-
 {{
     "action": "click",
     "target": "Search"
 }}
 
 TYPE:
-
 {{
     "action": "type",
     "target": "Enter your name",
@@ -72,22 +71,7 @@ TYPE:
 
 Return ONLY a JSON array.
 
-Example:
-
-[
-    {{
-        "action": "type",
-        "target": "Enter your name",
-        "value": "Kishan"
-    }},
-    {{
-        "action": "click",
-        "target": "Search"
-    }}
-]
-
 Rules:
-
 - Return ONLY valid JSON.
 - No markdown.
 - No explanation.
@@ -111,11 +95,7 @@ Rules:
 
 
 def extract_actions(text):
-    match = re.search(
-        r"\[.*\]",
-        text,
-        re.DOTALL
-    )
+    match = re.search(r"\[.*\]", text, re.DOTALL)
 
     if not match:
         return None
@@ -126,58 +106,6 @@ def extract_actions(text):
         return None
 
 
-def get_dom_elements(page):
-    elements = []
-
-    buttons = page.locator("button")
-
-    for i in range(buttons.count()):
-        button = buttons.nth(i)
-
-        try:
-            text = button.inner_text().strip()
-            box = button.bounding_box()
-
-            if box and text:
-                elements.append({
-                    "type": "button",
-                    "text": text,
-                    "x": round(box["x"], 2),
-                    "y": round(box["y"], 2),
-                    "width": round(box["width"], 2),
-                    "height": round(box["height"], 2)
-                })
-
-        except Exception:
-            continue
-
-    inputs = page.locator("input")
-
-    for i in range(inputs.count()):
-        input_element = inputs.nth(i)
-
-        try:
-            placeholder = input_element.get_attribute("placeholder")
-            input_type = input_element.get_attribute("type")
-            box = input_element.bounding_box()
-
-            if box:
-                elements.append({
-                    "type": "input",
-                    "text": placeholder or "input",
-                    "input_type": input_type or "text",
-                    "x": round(box["x"], 2),
-                    "y": round(box["y"], 2),
-                    "width": round(box["width"], 2),
-                    "height": round(box["height"], 2)
-                })
-
-        except Exception:
-            continue
-
-    return elements
-
-
 def get_ocr_text(page):
     screenshot = page.screenshot()
 
@@ -185,7 +113,58 @@ def get_ocr_text(page):
         io.BytesIO(screenshot)
     )
 
-    return pytesseract.image_to_string(image)
+    return pytesseract.image_to_string(image).strip()
+
+
+def print_ui_elements(elements):
+    print("\nUI ELEMENTS")
+    print("-" * 72)
+
+    if not elements:
+        print("No visible interactive elements found.")
+        return
+
+    print(f"{'#':<4} {'TYPE':<10} {'TEXT':<25} {'POSITION':<20}")
+    print("-" * 72)
+
+    for index, element in enumerate(elements, start=1):
+        element_type = element.get("type", "")
+        text = (
+            element.get("text")
+            or element.get("aria_label")
+            or element.get("placeholder")
+            or "-"
+        )
+
+        box = element.get("box", {})
+
+        position = (
+            f"({box.get('x', 0):.0f}, {box.get('y', 0):.0f}) "
+            f"{box.get('width', 0):.0f}x{box.get('height', 0):.0f}"
+        )
+
+        text = text[:23]
+
+        print(
+            f"{index:<4} "
+            f"{element_type:<10} "
+            f"{text:<25} "
+            f"{position:<20}"
+        )
+
+    print("-" * 72)
+
+
+def print_ocr_text(text):
+    print("\nOCR TEXT")
+    print("-" * 72)
+
+    if text:
+        print(text)
+    else:
+        print("No text detected.")
+
+    print("-" * 72)
 
 
 def execute_click(page, target):
@@ -198,18 +177,18 @@ def execute_click(page, target):
             text = button.inner_text().strip()
 
             if text.lower() == target.lower():
-                print(f"Clicking '{target}'...")
+                print(f"Clicking: {target}")
 
                 button.click()
 
-                print("CLICK COMPLETED")
+                print("Click completed.")
 
                 return True
 
         except Exception:
             continue
 
-    print(f"Button '{target}' not found.")
+    print(f"Button not found: {target}")
 
     return False
 
@@ -227,192 +206,187 @@ def execute_type(page, target, value):
                 placeholder
                 and placeholder.lower() == target.lower()
             ):
-                print(
-                    f"Typing '{value}' "
-                    f"into '{target}'..."
-                )
+                print(f"Typing into: {target}")
 
                 input_element.fill(value)
 
                 actual_value = input_element.input_value()
 
-                print(
-                    f"Value after typing: "
-                    f"'{actual_value}'"
-                )
-
                 if actual_value == value:
-                    print("TYPE VERIFIED")
+                    print("Type completed.")
                     return True
 
-                print("TYPE VERIFICATION FAILED")
+                print("Type verification failed.")
+
                 return False
 
         except Exception:
             continue
 
-    print(f"Input '{target}' not found.")
+    print(f"Input not found: {target}")
 
     return False
 
 
-with sync_playwright() as p:
-    print("\n====================================")
-    print("       VISUAL BROWSER AGENT")
-    print("====================================")
+def main():
+    configure_tesseract()
 
-    browser = p.chromium.launch(
-        headless=False
-    )
+    print("\n" + "=" * 72)
+    print("                    VISUAL BROWSER AGENT")
+    print("=" * 72)
 
-    page = browser.new_page(
-        viewport={
-            "width": 1280,
-            "height": 720
-        }
-    )
+    if not os.path.exists(TEST_PAGE):
+        print(f"\nTest page not found:")
+        print(TEST_PAGE)
+        return
 
-    file_path = os.path.abspath(
-        "test_page.html"
-    )
-
-    page.goto(
-        "file://" + file_path
-    )
-
-    page.wait_for_timeout(1000)
-
-    print("\nBrowser opened")
-
-    print("\n===== PERCEPTION =====")
-
-    elements = get_dom_elements(page)
-
-    print("\n--- UI ELEMENTS ---")
-
-    for element in elements:
-        print(element)
-
-    ocr_text = get_ocr_text(page)
-
-    print("\n--- OCR TEXT ---")
-    print(ocr_text)
-
-    user_goal = input(
-        "\nWhat do you want the agent to do?\n> "
-    )
-
-    print(
-        "\n===== ASKING OLLAMA FOR PLAN ====="
-    )
-
-    try:
-        raw_response = ask_ollama(
-            user_goal,
-            elements
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False
         )
 
-    except Exception as e:
-        print("\nOllama Error:")
-        print(e)
-
-        browser.close()
-        exit()
-
-    print("\nOLLAMA PLAN:")
-    print(raw_response)
-
-    actions = extract_actions(
-        raw_response
-    )
-
-    if not actions:
-        print("\nCould not parse action plan.")
-
-        browser.close()
-        exit()
-
-    print("\n===== ACTION PLAN =====")
-
-    for number, action in enumerate(
-        actions,
-        start=1
-    ):
-        print(
-            f"{number}. {action}"
+        page = browser.new_page(
+            viewport={
+                "width": 1280,
+                "height": 720
+            }
         )
 
-    all_success = True
-
-    for number, action in enumerate(
-        actions,
-        start=1
-    ):
-        print(
-            f"\n===== STEP {number} ====="
-        )
-
-        action_type = action.get(
-            "action"
-        )
-
-        target = action.get(
-            "target"
-        )
-
-        if action_type == "click":
-            success = execute_click(
-                page,
-                target
-            )
-
-        elif action_type == "type":
-            value = action.get(
-                "value",
-                ""
-            )
-
-            success = execute_type(
-                page,
-                target,
-                value
-            )
-
-        else:
-            print(
-                f"Unknown action: "
-                f"{action_type}"
-            )
-
-            success = False
-
-        if not success:
-            print(
-                f"\nSTEP {number} FAILED"
-            )
-
-            all_success = False
-            break
-
-        print(
-            f"STEP {number} SUCCESS"
+        page.goto(
+            "file://" + TEST_PAGE
         )
 
         page.wait_for_timeout(1000)
 
-    print(
-        "\n===================================="
-    )
+        print("\nBrowser opened.")
 
-    if all_success:
-        print("       TASK COMPLETED")
-    else:
-        print("       TASK FAILED")
+        print("\nPERCEPTION")
+        print("=" * 72)
 
-    print(
-        "===================================="
-    )
+        elements = get_dom_elements(page)
 
-    page.wait_for_timeout(5000)
+        print_ui_elements(elements)
 
-    browser.close()
+        ocr_text = get_ocr_text(page)
+
+        print_ocr_text(ocr_text)
+
+        user_goal = input(
+            "\nEnter task:\n> "
+        ).strip()
+
+        if not user_goal:
+            print("No task provided. Try again.")
+            page.wait_for_timeout(3000)
+            return
+
+        print("\nPLANNER")
+        print("=" * 72)
+        print("Sending task to Ollama...")
+
+        try:
+            raw_response = ask_ollama(
+                user_goal,
+                elements
+            )
+
+        except Exception as e:
+            print(f"\nOllama error: {e}")
+            browser.close()
+            return
+
+        actions = extract_actions(
+            raw_response
+        )
+
+        if not actions:
+            print("\nCould not parse Ollama action plan.")
+            print(raw_response)
+            browser.close()
+            return
+
+        print(f"Action plan generated: {len(actions)} step(s)")
+
+        print("\nACTION PLAN")
+        print("-" * 72)
+
+        for number, action in enumerate(
+            actions,
+            start=1
+        ):
+            action_type = action.get("action", "").upper()
+            target = action.get("target", "")
+
+            if action_type == "TYPE":
+                value = action.get("value", "")
+                print(
+                    f"{number}. TYPE   {target} -> {value}"
+                )
+            else:
+                print(
+                    f"{number}. {action_type:<6} {target}"
+                )
+
+        print("-" * 72)
+
+        all_success = True
+
+        for number, action in enumerate(
+            actions,
+            start=1
+        ):
+            action_type = action.get("action")
+            target = action.get("target")
+
+            print(f"\nSTEP {number}/{len(actions)}")
+
+            if action_type == "click":
+                success = execute_click(
+                    page,
+                    target
+                )
+
+            elif action_type == "type":
+                value = action.get(
+                    "value",
+                    ""
+                )
+
+                success = execute_type(
+                    page,
+                    target,
+                    value
+                )
+
+            else:
+                print(
+                    f"Unsupported action: {action_type}"
+                )
+
+                success = False
+
+            if not success:
+                print(f"Step {number} failed.")
+                all_success = False
+                break
+
+            print(f"Step {number} completed.")
+
+            page.wait_for_timeout(1000)
+
+        print("\n" + "=" * 72)
+
+        if all_success:
+            print("                         TASK COMPLETED")
+        else:
+            print("                           TASK FAILED")
+
+        print("=" * 72)
+
+        page.wait_for_timeout(3000)
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    main()
