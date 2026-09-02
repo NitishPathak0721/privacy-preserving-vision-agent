@@ -6,28 +6,41 @@ import io
 import json
 import os
 import re
-
-
-# ============================================================
-# CONFIG
-# ============================================================
+import shutil
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.2:3b"
 
-TESSERACT_PATH = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
 
-pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+def configure_tesseract():
+    tesseract_path = shutil.which("tesseract")
+
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        print(f"Tesseract found: {tesseract_path}")
+        return
+
+    windows_paths = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ]
+
+    for path in windows_paths:
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            print(f"Tesseract found: {path}")
+            return
+
+    raise RuntimeError(
+        "Tesseract OCR not found.\n"
+        "Install Tesseract and make sure it is available in PATH."
+    )
 
 
-# ============================================================
-# OLLAMA
-# ============================================================
+configure_tesseract()
+
 
 def ask_ollama(user_goal, elements):
-
     prompt = f"""
 You are a browser automation planner.
 
@@ -97,12 +110,7 @@ Rules:
     return response.json()["response"]
 
 
-# ============================================================
-# EXTRACT JSON ARRAY
-# ============================================================
-
 def extract_actions(text):
-
     match = re.search(
         r"\[.*\]",
         text,
@@ -113,42 +121,24 @@ def extract_actions(text):
         return None
 
     try:
-
-        return json.loads(
-            match.group()
-        )
-
+        return json.loads(match.group())
     except json.JSONDecodeError:
-
         return None
 
 
-# ============================================================
-# GET DOM ELEMENTS
-# ============================================================
-
 def get_dom_elements(page):
-
     elements = []
-
-    # --------------------------------------------------------
-    # BUTTONS
-    # --------------------------------------------------------
 
     buttons = page.locator("button")
 
     for i in range(buttons.count()):
-
         button = buttons.nth(i)
 
         try:
-
             text = button.inner_text().strip()
-
             box = button.bounding_box()
 
             if box and text:
-
                 elements.append({
                     "type": "button",
                     "text": text,
@@ -159,36 +149,19 @@ def get_dom_elements(page):
                 })
 
         except Exception:
-
             continue
-
-
-    # --------------------------------------------------------
-    # INPUTS
-    # --------------------------------------------------------
 
     inputs = page.locator("input")
 
     for i in range(inputs.count()):
-
         input_element = inputs.nth(i)
 
         try:
-
-            placeholder = (
-                input_element
-                .get_attribute("placeholder")
-            )
-
-            input_type = (
-                input_element
-                .get_attribute("type")
-            )
-
+            placeholder = input_element.get_attribute("placeholder")
+            input_type = input_element.get_attribute("type")
             box = input_element.bounding_box()
 
             if box:
-
                 elements.append({
                     "type": "input",
                     "text": placeholder or "input",
@@ -200,167 +173,93 @@ def get_dom_elements(page):
                 })
 
         except Exception:
-
             continue
 
     return elements
 
 
-# ============================================================
-# OCR
-# ============================================================
-
 def get_ocr_text(page):
-
     screenshot = page.screenshot()
 
     image = Image.open(
         io.BytesIO(screenshot)
     )
 
-    return pytesseract.image_to_string(
-        image
-    )
+    return pytesseract.image_to_string(image)
 
-
-# ============================================================
-# CLICK
-# ============================================================
 
 def execute_click(page, target):
-
     buttons = page.locator("button")
 
     for i in range(buttons.count()):
-
         button = buttons.nth(i)
 
         try:
-
             text = button.inner_text().strip()
 
             if text.lower() == target.lower():
-
-                print(
-                    f"🖱️ Clicking '{target}'..."
-                )
+                print(f"Clicking '{target}'...")
 
                 button.click()
 
-                print(
-                    "✅ CLICK COMPLETED"
-                )
+                print("CLICK COMPLETED")
 
                 return True
 
         except Exception:
-
             continue
 
-
-    print(
-        f"❌ Button '{target}' not found."
-    )
+    print(f"Button '{target}' not found.")
 
     return False
 
 
-# ============================================================
-# TYPE
-# ============================================================
-
 def execute_type(page, target, value):
-
     inputs = page.locator("input")
 
     for i in range(inputs.count()):
-
         input_element = inputs.nth(i)
 
         try:
-
-            placeholder = (
-                input_element
-                .get_attribute("placeholder")
-            )
+            placeholder = input_element.get_attribute("placeholder")
 
             if (
                 placeholder
-                and
-                placeholder.lower()
-                == target.lower()
+                and placeholder.lower() == target.lower()
             ):
-
                 print(
-                    f"⌨️ Typing '{value}' "
+                    f"Typing '{value}' "
                     f"into '{target}'..."
                 )
 
                 input_element.fill(value)
 
-                # -------------------------
-                # VERIFY
-                # -------------------------
-
-                actual_value = (
-                    input_element.input_value()
-                )
+                actual_value = input_element.input_value()
 
                 print(
-                    f"🔍 Value after typing: "
+                    f"Value after typing: "
                     f"'{actual_value}'"
                 )
 
                 if actual_value == value:
-
-                    print(
-                        "✅ TYPE VERIFIED"
-                    )
-
+                    print("TYPE VERIFIED")
                     return True
 
-                else:
-
-                    print(
-                        "❌ TYPE VERIFICATION FAILED"
-                    )
-
-                    return False
+                print("TYPE VERIFICATION FAILED")
+                return False
 
         except Exception:
-
             continue
 
-
-    print(
-        f"❌ Input '{target}' not found."
-    )
+    print(f"Input '{target}' not found.")
 
     return False
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 with sync_playwright() as p:
-
-    print(
-        "\n===================================="
-    )
-
-    print(
-        "       VISUAL BROWSER AGENT"
-    )
-
-    print(
-        "===================================="
-    )
-
-
-    # --------------------------------------------------------
-    # Browser
-    # --------------------------------------------------------
+    print("\n====================================")
+    print("       VISUAL BROWSER AGENT")
+    print("====================================")
 
     browser = p.chromium.launch(
         headless=False
@@ -373,11 +272,6 @@ with sync_playwright() as p:
         }
     )
 
-
-    # --------------------------------------------------------
-    # Local webpage
-    # --------------------------------------------------------
-
     file_path = os.path.abspath(
         "test_page.html"
     )
@@ -386,154 +280,77 @@ with sync_playwright() as p:
         "file://" + file_path
     )
 
-    page.wait_for_timeout(
-        1000
-    )
+    page.wait_for_timeout(1000)
 
-    print(
-        "\n🌐 Browser opened"
-    )
+    print("\nBrowser opened")
 
+    print("\n===== PERCEPTION =====")
 
-    # ========================================================
-    # PERCEPTION
-    # ========================================================
+    elements = get_dom_elements(page)
 
-    print(
-        "\n===== PERCEPTION ====="
-    )
-
-    elements = get_dom_elements(
-        page
-    )
-
-
-    print(
-        "\n--- UI ELEMENTS ---"
-    )
+    print("\n--- UI ELEMENTS ---")
 
     for element in elements:
+        print(element)
 
-        print(
-            element
-        )
+    ocr_text = get_ocr_text(page)
 
-
-    # --------------------------------------------------------
-    # OCR
-    # --------------------------------------------------------
-
-    ocr_text = get_ocr_text(
-        page
-    )
-
-    print(
-        "\n--- OCR TEXT ---"
-    )
-
-    print(
-        ocr_text
-    )
-
-
-    # ========================================================
-    # USER GOAL
-    # ========================================================
+    print("\n--- OCR TEXT ---")
+    print(ocr_text)
 
     user_goal = input(
         "\nWhat do you want the agent to do?\n> "
     )
 
-
-    # ========================================================
-    # PLANNING
-    # ========================================================
-
     print(
         "\n===== ASKING OLLAMA FOR PLAN ====="
     )
 
-
     try:
-
         raw_response = ask_ollama(
             user_goal,
             elements
         )
 
     except Exception as e:
-
-        print(
-            "\n❌ Ollama Error:"
-        )
-
+        print("\nOllama Error:")
         print(e)
 
         browser.close()
-
         exit()
 
-
-    print(
-        "\nOLLAMA PLAN:"
-    )
-
-    print(
-        raw_response
-    )
-
-
-    # ========================================================
-    # PARSE PLAN
-    # ========================================================
+    print("\nOLLAMA PLAN:")
+    print(raw_response)
 
     actions = extract_actions(
         raw_response
     )
 
-
     if not actions:
-
-        print(
-            "\n❌ Could not parse action plan."
-        )
+        print("\nCould not parse action plan.")
 
         browser.close()
-
         exit()
 
-
-    print(
-        "\n===== ACTION PLAN ====="
-    )
-
+    print("\n===== ACTION PLAN =====")
 
     for number, action in enumerate(
         actions,
         start=1
     ):
-
         print(
             f"{number}. {action}"
         )
 
-
-    # ========================================================
-    # EXECUTE PLAN
-    # ========================================================
-
     all_success = True
-
 
     for number, action in enumerate(
         actions,
         start=1
     ):
-
         print(
             f"\n===== STEP {number} ====="
         )
-
 
         action_type = action.get(
             "action"
@@ -543,25 +360,13 @@ with sync_playwright() as p:
             "target"
         )
 
-
-        # ----------------------------------------------------
-        # CLICK
-        # ----------------------------------------------------
-
         if action_type == "click":
-
             success = execute_click(
                 page,
                 target
             )
 
-
-        # ----------------------------------------------------
-        # TYPE
-        # ----------------------------------------------------
-
         elif action_type == "type":
-
             value = action.get(
                 "value",
                 ""
@@ -573,80 +378,41 @@ with sync_playwright() as p:
                 value
             )
 
-
-        # ----------------------------------------------------
-        # UNKNOWN
-        # ----------------------------------------------------
-
         else:
-
             print(
-                f"❌ Unknown action: "
+                f"Unknown action: "
                 f"{action_type}"
             )
 
             success = False
 
-
-        # ----------------------------------------------------
-        # Stop if failed
-        # ----------------------------------------------------
-
         if not success:
-
             print(
-                f"\n❌ STEP {number} FAILED"
+                f"\nSTEP {number} FAILED"
             )
 
             all_success = False
-
             break
 
-
         print(
-            f"✅ STEP {number} SUCCESS"
+            f"STEP {number} SUCCESS"
         )
 
-
-        # Small wait before next step
-
-        page.wait_for_timeout(
-            1000
-        )
-
-
-    # ========================================================
-    # FINAL RESULT
-    # ========================================================
+        page.wait_for_timeout(1000)
 
     print(
         "\n===================================="
     )
 
-
     if all_success:
-
-        print(
-            "       🎉 TASK COMPLETED"
-        )
-
+        print("       TASK COMPLETED")
     else:
-
-        print(
-            "       ❌ TASK FAILED"
-        )
-
+        print("       TASK FAILED")
 
     print(
         "===================================="
     )
 
-
-    # Keep browser open
-
-    page.wait_for_timeout(
-        5000
-    )
-
+    page.wait_for_timeout(5000)
 
     browser.close()
