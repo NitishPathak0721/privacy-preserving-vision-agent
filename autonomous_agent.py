@@ -10,6 +10,7 @@ from agent.privacy.sanitizer import (
     sanitize_page,
     sanitize_page_text,
 )
+from agent.privacy.visual import find_sensitive_ocr_regions
 
 # AI action validation module.
 from agent.planner import validate_actions
@@ -48,11 +49,13 @@ MAX_REPLANS_PER_TASK = 5
 MAX_TASK_RUNTIME_SECONDS = 120
 MAX_VERIFY_RETRIES = 1
 
+
 # One-time verification failure test.
 TEST_REPLAN = os.getenv(
     "AGENT_TEST_REPLAN",
     "0",
 ) == "1"
+
 
 # Demo webpage location.
 BASE_DIR = os.path.dirname(
@@ -617,6 +620,7 @@ def get_ocr_text(page):
         "regions": regions,
     }
 
+
 # Display discovered UI elements.
 def print_ui_elements(elements):
     print("\nUI ELEMENTS")
@@ -728,6 +732,43 @@ def print_privacy_findings(findings):
             f"{index}. "
             f"{finding_type.upper():<15} "
             f"{display_value}"
+        )
+
+    print("-" * 72)
+
+
+# Display visual privacy findings.
+def print_visual_privacy_findings(
+    findings,
+):
+    print("\nVISUAL PRIVACY FIREWALL")
+    print("-" * 72)
+
+    if not findings:
+        print(
+            "No sensitive OCR regions detected."
+        )
+        print("-" * 72)
+        return
+
+    print(
+        f"Sensitive OCR regions detected: "
+        f"{len(findings)}"
+    )
+
+    for index, finding in enumerate(
+        findings,
+        start=1,
+    ):
+        finding_type = finding.get(
+            "type",
+            "unknown",
+        )
+
+        print(
+            f"{index}. "
+            f"{finding_type.upper():<15} "
+            f"[REDACTED]"
         )
 
     print("-" * 72)
@@ -1158,6 +1199,17 @@ def main():
             ocr_text
         )
 
+        # Initial visual privacy analysis.
+        visual_privacy_findings = (
+            find_sensitive_ocr_regions(
+                ocr_result
+            )
+        )
+
+        print_visual_privacy_findings(
+            visual_privacy_findings
+        )
+
         # Initial privacy analysis.
         print(
             "\nPRIVACY ANALYSIS"
@@ -1167,11 +1219,13 @@ def main():
             "=" * 72
         )
 
+        page_text = page.locator(
+            "body"
+        ).inner_text()
+
         privacy_findings = inspect_page(
             elements,
-            page.locator(
-                "body"
-            ).inner_text(),
+            page_text,
         )
 
         print_privacy_findings(
@@ -1266,11 +1320,13 @@ def main():
                 page
             )
 
+            page_text = page.locator(
+                "body"
+            ).inner_text()
+
             privacy_findings = inspect_page(
                 elements,
-                page.locator(
-                    "body"
-                ).inner_text(),
+                page_text,
             )
 
             safe_elements = sanitize_page(
@@ -1280,12 +1336,28 @@ def main():
 
             safe_page_text = (
                 sanitize_page_text(
-                    page.locator(
-                        "body"
-                    ).inner_text(),
+                    page_text,
                     privacy_findings,
                 )
             )
+
+            # Detect sensitive visual regions before planning.
+            ocr_result = get_ocr_text(
+                page
+            )
+
+            visual_privacy_findings = (
+                find_sensitive_ocr_regions(
+                    ocr_result
+                )
+            )
+
+            if visual_privacy_findings:
+                print(
+                    f"Visual privacy regions "
+                    f"blocked: "
+                    f"{len(visual_privacy_findings)}"
+                )
 
             # Determine the next required sequence step.
             if (
