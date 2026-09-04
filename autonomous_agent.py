@@ -49,10 +49,16 @@ MAX_TASK_RUNTIME_SECONDS = 120
 MAX_VERIFY_RETRIES = 1
 
 # One-time verification failure test.
-TEST_REPLAN = os.getenv("AGENT_TEST_REPLAN", "0") == "1"
+TEST_REPLAN = os.getenv(
+    "AGENT_TEST_REPLAN",
+    "0",
+) == "1"
 
 # Demo webpage location.
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
 TEST_PAGE = os.path.join(
     BASE_DIR,
     "demo",
@@ -62,11 +68,19 @@ TEST_PAGE = os.path.join(
 
 # Configure Tesseract OCR.
 def configure_tesseract():
-    tesseract_path = shutil.which("tesseract")
+    tesseract_path = shutil.which(
+        "tesseract"
+    )
 
     if tesseract_path:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        print(f"Tesseract: {tesseract_path}")
+        pytesseract.pytesseract.tesseract_cmd = (
+            tesseract_path
+        )
+
+        print(
+            f"Tesseract: {tesseract_path}"
+        )
+
         return
 
     windows_paths = [
@@ -76,16 +90,27 @@ def configure_tesseract():
 
     for path in windows_paths:
         if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            print(f"Tesseract: {path}")
+            pytesseract.pytesseract.tesseract_cmd = (
+                path
+            )
+
+            print(
+                f"Tesseract: {path}"
+            )
+
             return
 
     raise RuntimeError(
-        "Tesseract OCR not found. Install Tesseract and add it to PATH."
+        "Tesseract OCR not found. "
+        "Install Tesseract and add it to PATH."
     )
 
+
 # Infer deterministic constraints from explicit task wording.
-def infer_task_constraint(user_goal, elements):
+def infer_task_constraint(
+    user_goal,
+    elements,
+):
     goal = user_goal.strip()
     lower_goal = goal.lower()
 
@@ -97,7 +122,10 @@ def infer_task_constraint(user_goal, elements):
     )
 
     if search_match:
-        value = search_match.group(1).strip()
+        value = (
+            search_match.group(1)
+            .strip()
+        )
 
         input_target = None
         search_target = None
@@ -126,6 +154,7 @@ def infer_task_constraint(user_goal, elements):
                     placeholder
                     or aria_label
                 )
+
                 break
 
         for element in elements:
@@ -150,9 +179,13 @@ def infer_task_constraint(user_goal, elements):
                     text
                     or aria_label
                 )
+
                 break
 
-        if input_target and search_target:
+        if (
+            input_target
+            and search_target
+        ):
             return {
                 "intent": "sequence",
                 "steps": [
@@ -274,21 +307,31 @@ def infer_task_constraint(user_goal, elements):
         "target": "",
     }
 
+
 # Sanitize action history before sending it to the local model.
-def sanitize_action_history(action_history):
+def sanitize_action_history(
+    action_history,
+):
     sanitized = []
 
     for item in action_history:
         sanitized.append(
             {
-                "action": item.get("action"),
-                "target": item.get("target"),
+                "action": item.get(
+                    "action"
+                ),
+                "target": item.get(
+                    "target"
+                ),
                 "value": (
                     "[REDACTED]"
-                    if item.get("action") == "type"
+                    if item.get("action")
+                    == "type"
                     else None
                 ),
-                "result": item.get("result"),
+                "result": item.get(
+                    "result"
+                ),
             }
         )
 
@@ -303,11 +346,13 @@ def ask_ollama(
     task_constraint,
     action_history,
 ):
-    sanitized_history = sanitize_action_history(
-        action_history
+    sanitized_history = (
+        sanitize_action_history(
+            action_history
+        )
     )
 
-    # Build the exact data that is allowed to leave the privacy firewall.
+    # Build the exact data allowed to leave the privacy firewall.
     payload_context = {
         "user_goal": user_goal,
         "task_constraint": task_constraint,
@@ -316,7 +361,7 @@ def ask_ollama(
         "action_history": sanitized_history,
     }
 
-    # Privacy audit: block known sensitive values from leaving the firewall.
+    # Privacy audit: block known sensitive values.
     payload_text = json.dumps(
         payload_context,
         ensure_ascii=False,
@@ -347,7 +392,9 @@ def ask_ollama(
         ).lower()
 
         if input_type == "password":
-            value = element.get("value")
+            value = element.get(
+                "value"
+            )
 
             if value:
                 raise RuntimeError(
@@ -359,11 +406,21 @@ def ask_ollama(
     # Print an auditable outbound payload summary.
     print("\nOLLAMA PRIVACY AUDIT")
     print("-" * 72)
-    print("Raw webpage data sent: NO")
-    print("Sanitized page text sent: YES")
-    print("Sanitized UI elements sent: YES")
-    print("Credential values sent: NO")
-    print("PII patterns detected in payload: NO")
+    print(
+        "Raw webpage data sent: NO"
+    )
+    print(
+        "Sanitized page text sent: YES"
+    )
+    print(
+        "Sanitized UI elements sent: YES"
+    )
+    print(
+        "Credential values sent: NO"
+    )
+    print(
+        "PII patterns detected in payload: NO"
+    )
     print("-" * 72)
 
     prompt = f"""
@@ -437,6 +494,7 @@ STRICT RULES:
 
     return response.json()["response"]
 
+
 # Extract a JSON object or array from the model response.
 def extract_actions(text):
     text = text.strip()
@@ -453,7 +511,10 @@ def extract_actions(text):
                 object_match.group()
             )
 
-            if isinstance(parsed, dict):
+            if isinstance(
+                parsed,
+                dict,
+            ):
                 return [parsed]
 
         except json.JSONDecodeError:
@@ -471,7 +532,10 @@ def extract_actions(text):
                 array_match.group()
             )
 
-            if isinstance(parsed, list):
+            if isinstance(
+                parsed,
+                list,
+            ):
                 return parsed
 
         except json.JSONDecodeError:
@@ -480,17 +544,75 @@ def extract_actions(text):
     return None
 
 
-# Capture visible webpage text through OCR.
+# Capture screenshot and extract OCR text with coordinates.
 def get_ocr_text(page):
     screenshot = page.screenshot()
 
     image = Image.open(
         io.BytesIO(screenshot)
+    ).convert("RGB")
+
+    ocr_data = pytesseract.image_to_data(
+        image,
+        output_type=pytesseract.Output.DICT,
     )
 
-    return pytesseract.image_to_string(
-        image
-    ).strip()
+    words = []
+    regions = []
+
+    for index, text in enumerate(
+        ocr_data["text"]
+    ):
+        text = text.strip()
+
+        if not text:
+            continue
+
+        try:
+            confidence = float(
+                ocr_data["conf"][index]
+            )
+        except (
+            ValueError,
+            TypeError,
+        ):
+            confidence = 0
+
+        x = int(
+            ocr_data["left"][index]
+        )
+
+        y = int(
+            ocr_data["top"][index]
+        )
+
+        width = int(
+            ocr_data["width"][index]
+        )
+
+        height = int(
+            ocr_data["height"][index]
+        )
+
+        words.append(text)
+
+        regions.append(
+            {
+                "text": text,
+                "confidence": confidence,
+                "box": {
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                },
+            }
+        )
+
+    return {
+        "text": " ".join(words),
+        "regions": regions,
+    }
 
 
 # Display discovered UI elements.
@@ -499,7 +621,9 @@ def print_ui_elements(elements):
     print("-" * 72)
 
     if not elements:
-        print("No visible interactive elements found.")
+        print(
+            "No visible interactive elements found."
+        )
         return
 
     print(
@@ -568,7 +692,9 @@ def print_privacy_findings(findings):
     print("-" * 72)
 
     if not findings:
-        print("No sensitive information detected.")
+        print(
+            "No sensitive information detected."
+        )
         print("-" * 72)
         return
 
@@ -586,7 +712,9 @@ def print_privacy_findings(findings):
             "unknown",
         )
 
-        value = finding.get("value")
+        value = finding.get(
+            "value"
+        )
 
         display_value = (
             "[REDACTED]"
@@ -609,7 +737,9 @@ def print_safe_elements(elements):
     print("-" * 72)
 
     if not elements:
-        print("No safe UI elements available.")
+        print(
+            "No safe UI elements available."
+        )
         print("-" * 72)
         return
 
@@ -659,7 +789,11 @@ def capture_state(page):
 
 
 # Execute and verify a click action.
-def execute_click(page, target, before_state):
+def execute_click(
+    page,
+    target,
+    before_state,
+):
     global TEST_REPLAN
 
     locators = [
@@ -668,7 +802,9 @@ def execute_click(page, target, before_state):
     ]
 
     for locator in locators:
-        for i in range(locator.count()):
+        for i in range(
+            locator.count()
+        ):
             element = locator.nth(i)
 
             try:
@@ -680,7 +816,10 @@ def execute_click(page, target, before_state):
                     or ""
                 )
 
-                if text.lower() != target.lower():
+                if (
+                    text.lower()
+                    != target.lower()
+                ):
                     continue
 
                 print(
@@ -703,7 +842,9 @@ def execute_click(page, target, before_state):
                     "Click completed."
                 )
 
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(
+                    500
+                )
 
                 after_state = capture_state(
                     page
@@ -730,7 +871,7 @@ def execute_click(page, target, before_state):
 
                     return True
 
-                # The browser accepted the click even if no visible state changed.
+                # Browser accepted the click even without visible state change.
                 print(
                     "Action verification passed: "
                     "click executed successfully."
@@ -742,6 +883,7 @@ def execute_click(page, target, before_state):
                 print(
                     f"Click error: {e}"
                 )
+
                 continue
 
     print(
@@ -750,16 +892,25 @@ def execute_click(page, target, before_state):
 
     return False
 
+
 # Execute and verify a type action.
-def execute_type(page, target, value):
+def execute_type(
+    page,
+    target,
+    value,
+):
     locators = [
         page.locator("input"),
         page.locator("textarea"),
     ]
 
     for locator in locators:
-        for i in range(locator.count()):
-            input_element = locator.nth(i)
+        for i in range(
+            locator.count()
+        ):
+            input_element = locator.nth(
+                i
+            )
 
             try:
                 candidates = [
@@ -837,9 +988,10 @@ def enforce_constraint(
             return None
 
         actions[0]["action"] = "click"
-        actions[0]["target"] = task_constraint[
-            "target"
-        ]
+
+        actions[0]["target"] = (
+            task_constraint["target"]
+        )
 
         return actions
 
@@ -848,12 +1000,14 @@ def enforce_constraint(
             return None
 
         actions[0]["action"] = "type"
-        actions[0]["target"] = task_constraint[
-            "target"
-        ]
-        actions[0]["value"] = task_constraint[
-            "value"
-        ]
+
+        actions[0]["target"] = (
+            task_constraint["target"]
+        )
+
+        actions[0]["value"] = (
+            task_constraint["value"]
+        )
 
         return actions
 
@@ -862,7 +1016,9 @@ def enforce_constraint(
             "steps"
         ]
 
-        if completed_steps >= len(steps):
+        if completed_steps >= len(
+            steps
+        ):
             return []
 
         expected = steps[
@@ -872,7 +1028,10 @@ def enforce_constraint(
         matching = [
             action
             for action in actions
-            if action.get("action")
+            if (
+                action.get("action")
+                or ""
+            ).lower()
             == expected["action"]
         ]
 
@@ -889,7 +1048,10 @@ def enforce_constraint(
             "target"
         ]
 
-        if expected["action"] == "type":
+        if (
+            expected["action"]
+            == "type"
+        ):
             action["value"] = expected[
                 "value"
             ]
@@ -905,20 +1067,39 @@ def main():
 
     configure_tesseract()
 
-    print("\n" + "=" * 72)
-    print("                    PRIVACY-PRESERVING")
-    print("                     VISUAL BROWSER AGENT")
-    print("=" * 72)
+    print(
+        "\n" + "=" * 72
+    )
 
-    if not os.path.exists(TEST_PAGE):
-        print("\nTest page not found:")
+    print(
+        "                    PRIVACY-PRESERVING"
+    )
+
+    print(
+        "                     VISUAL BROWSER AGENT"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    if not os.path.exists(
+        TEST_PAGE
+    ):
+        print(
+            "\nTest page not found:"
+        )
+
         print(TEST_PAGE)
+
         return
 
     start_time = time.time()
+
     action_count = 0
     replan_count = 0
     completed_steps = 0
+
     action_history = []
 
     with sync_playwright() as p:
@@ -937,13 +1118,22 @@ def main():
             "file://" + TEST_PAGE
         )
 
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(
+            1000
+        )
 
-        print("\nBrowser opened.")
+        print(
+            "\nBrowser opened."
+        )
 
         # Initial perception.
-        print("\nPERCEPTION")
-        print("=" * 72)
+        print(
+            "\nPERCEPTION"
+        )
+
+        print(
+            "=" * 72
+        )
 
         elements = get_dom_elements(
             page
@@ -953,21 +1143,33 @@ def main():
             elements
         )
 
-        ocr_text = get_ocr_text(
+        # Initial OCR perception.
+        ocr_result = get_ocr_text(
             page
         )
+
+        ocr_text = ocr_result[
+            "text"
+        ]
 
         print_ocr_text(
             ocr_text
         )
 
         # Initial privacy analysis.
-        print("\nPRIVACY ANALYSIS")
-        print("=" * 72)
+        print(
+            "\nPRIVACY ANALYSIS"
+        )
+
+        print(
+            "=" * 72
+        )
 
         privacy_findings = inspect_page(
             elements,
-            page.locator("body").inner_text(),
+            page.locator(
+                "body"
+            ).inner_text(),
         )
 
         print_privacy_findings(
@@ -989,18 +1191,29 @@ def main():
         ).strip()
 
         if not user_goal:
-            print("No task provided.")
+            print(
+                "No task provided."
+            )
+
             browser.close()
+
             return
 
         # Determine deterministic task constraints.
-        task_constraint = infer_task_constraint(
-            user_goal,
-            safe_elements,
+        task_constraint = (
+            infer_task_constraint(
+                user_goal,
+                safe_elements,
+            )
         )
 
-        print("\nAGENT LOOP")
-        print("=" * 72)
+        print(
+            "\nAGENT LOOP"
+        )
+
+        print(
+            "=" * 72
+        )
 
         print(
             f"Task constraint: "
@@ -1016,22 +1229,34 @@ def main():
                 - start_time
             )
 
-            if runtime > MAX_TASK_RUNTIME_SECONDS:
+            if (
+                runtime
+                > MAX_TASK_RUNTIME_SECONDS
+            ):
                 print(
                     "Task runtime limit exceeded."
                 )
+
                 break
 
-            if action_count >= MAX_ACTIONS_PER_TASK:
+            if (
+                action_count
+                >= MAX_ACTIONS_PER_TASK
+            ):
                 print(
                     "Action limit exceeded."
                 )
+
                 break
 
-            if replan_count > MAX_REPLANS_PER_TASK:
+            if (
+                replan_count
+                > MAX_REPLANS_PER_TASK
+            ):
                 print(
                     "Replan limit exceeded."
                 )
+
                 break
 
             # Perceive current page before every plan.
@@ -1041,7 +1266,9 @@ def main():
 
             privacy_findings = inspect_page(
                 elements,
-                page.locator("body").inner_text(),
+                page.locator(
+                    "body"
+                ).inner_text(),
             )
 
             safe_elements = sanitize_page(
@@ -1049,19 +1276,30 @@ def main():
                 privacy_findings,
             )
 
-            safe_page_text = sanitize_page_text(
-                page.locator("body").inner_text(),
-                privacy_findings,
+            safe_page_text = (
+                sanitize_page_text(
+                    page.locator(
+                        "body"
+                    ).inner_text(),
+                    privacy_findings,
+                )
             )
 
             # Determine the next required sequence step.
-            if task_constraint["intent"] == "sequence":
+            if (
+                task_constraint["intent"]
+                == "sequence"
+            ):
                 steps = task_constraint[
                     "steps"
                 ]
 
-                if completed_steps >= len(steps):
+                if (
+                    completed_steps
+                    >= len(steps)
+                ):
                     task_completed = True
+
                     break
 
             print(
@@ -1069,14 +1307,21 @@ def main():
                 f"{replan_count + 1}"
             )
 
-            print("-" * 72)
+            print(
+                "-" * 72
+            )
 
             # Use deterministic steps directly when the task constraint is known.
-            if task_constraint["intent"] == "sequence":
+            if (
+                task_constraint["intent"]
+                == "sequence"
+            ):
                 actions = [
                     task_constraint[
                         "steps"
-                    ][completed_steps].copy()
+                    ][
+                        completed_steps
+                    ].copy()
                 ]
 
                 print(
@@ -1090,18 +1335,21 @@ def main():
                 )
 
                 try:
-                    raw_response = ask_ollama(
-                        user_goal,
-                        safe_elements,
-                        safe_page_text,
-                        task_constraint,
-                        action_history,
+                    raw_response = (
+                        ask_ollama(
+                            user_goal,
+                            safe_elements,
+                            safe_page_text,
+                            task_constraint,
+                            action_history,
+                        )
                     )
 
                 except Exception as e:
                     print(
                         f"Ollama error: {e}"
                     )
+
                     break
 
                 actions = extract_actions(
@@ -1115,6 +1363,7 @@ def main():
                     )
 
                     replan_count += 1
+
                     continue
 
                 actions = enforce_constraint(
@@ -1129,11 +1378,14 @@ def main():
                     )
 
                     replan_count += 1
+
                     continue
 
             if not actions:
                 if (
-                    task_constraint["intent"]
+                    task_constraint[
+                        "intent"
+                    ]
                     == "sequence"
                     and completed_steps
                     >= len(
@@ -1143,6 +1395,7 @@ def main():
                     )
                 ):
                     task_completed = True
+
                 else:
                     print(
                         "No valid action generated."
@@ -1158,13 +1411,16 @@ def main():
                 )
 
                 replan_count += 1
+
                 continue
 
             action = actions[0]
 
-            valid, errors = validate_actions(
-                actions,
-                elements,
+            valid, errors = (
+                validate_actions(
+                    actions,
+                    elements,
+                )
             )
 
             if not valid:
@@ -1176,6 +1432,7 @@ def main():
                     print(error)
 
                 replan_count += 1
+
                 continue
 
             print(
@@ -1242,23 +1499,38 @@ def main():
                 )
 
                 # Check single-action task completion.
-                if task_constraint["intent"] in {
-                    "click_only",
-                    "type_only",
-                }:
+                if (
+                    task_constraint[
+                        "intent"
+                    ]
+                    in {
+                        "click_only",
+                        "type_only",
+                    }
+                ):
                     task_completed = True
+
                     break
 
                 # Advance only after a successful sequence step.
-                if task_constraint["intent"] == "sequence":
+                if (
+                    task_constraint[
+                        "intent"
+                    ]
+                    == "sequence"
+                ):
                     completed_steps += 1
 
-                    if completed_steps >= len(
-                        task_constraint[
-                            "steps"
-                        ]
+                    if (
+                        completed_steps
+                        >= len(
+                            task_constraint[
+                                "steps"
+                            ]
+                        )
                     ):
                         task_completed = True
+
                         break
 
                 # Re-perceive and plan again.
@@ -1283,7 +1555,9 @@ def main():
                         if action_type == "type"
                         else None
                     ),
-                    "result": "verification_failed",
+                    "result": (
+                        "verification_failed"
+                    ),
                 }
             )
 
@@ -1303,7 +1577,9 @@ def main():
             # Re-perception happens at the top of the loop.
 
         # Final status.
-        print("\n" + "=" * 72)
+        print(
+            "\n" + "=" * 72
+        )
 
         if task_completed:
             print(
@@ -1314,13 +1590,23 @@ def main():
                 "                      TASK FAILED"
             )
 
-        print("=" * 72)
+        print(
+            "=" * 72
+        )
 
-        print("\nACTION HISTORY")
-        print("-" * 72)
+        print(
+            "\nACTION HISTORY"
+        )
+
+        print(
+            "-" * 72
+        )
 
         if not action_history:
-            print("No actions executed.")
+            print(
+                "No actions executed."
+            )
+
         else:
             for index, item in enumerate(
                 action_history,
@@ -1348,7 +1634,9 @@ def main():
                     f"{result}"
                 )
 
-        print("-" * 72)
+        print(
+            "-" * 72
+        )
 
         page.wait_for_timeout(
             3000
