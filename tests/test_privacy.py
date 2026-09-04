@@ -43,16 +43,37 @@ def test_pii_detection_and_sanitization():
             "aria_label": "",
             "name": "password",
         },
+        {
+            "type": "input",
+            "text": "",
+            "value": "1234 5678 9012",
+            "placeholder": "Aadhaar",
+            "aria_label": "",
+            "name": "aadhaar",
+        },
+        {
+            "type": "input",
+            "text": "",
+            "value": "ABCDE1234F",
+            "placeholder": "PAN",
+            "aria_label": "",
+            "name": "pan",
+        },
     ]
 
     page_text = (
         "Name: Shivansh Srivastava\n"
         "Email: shivansh@example.com\n"
         "Phone: +919876543210\n"
-        "Card: 4111 1111 1111 1111"
+        "Card: 4111 1111 1111 1111\n"
+        "Aadhaar: 1234 5678 9012\n"
+        "PAN: ABCDE1234F"
     )
 
-    findings = inspect_page(elements, page_text)
+    findings = inspect_page(
+        elements,
+        page_text,
+    )
 
     sanitized = sanitize_page(
         elements,
@@ -73,12 +94,16 @@ def test_pii_detection_and_sanitization():
     assert "phone" in finding_types
     assert "credit_card" in finding_types
     assert "credential" in finding_types
+    assert "aadhaar" in finding_types
+    assert "pan" in finding_types
 
     raw_values = [
         "shivansh@example.com",
         "+919876543210",
         "4111 1111 1111 1111",
         "secret-password",
+        "1234 5678 9012",
+        "ABCDE1234F",
     ]
 
     sanitized_dom = str(sanitized)
@@ -91,12 +116,38 @@ def test_pii_detection_and_sanitization():
     assert "[PHONE]" in sanitized_dom
     assert "[CREDIT_CARD]" in sanitized_dom
     assert "[REDACTED]" in sanitized_dom
+    assert "[AADHAAR]" in sanitized_dom
+    assert "[PAN]" in sanitized_dom
 
     assert "[EMAIL]" in sanitized_text
     assert "[PHONE]" in sanitized_text
     assert "[CREDIT_CARD]" in sanitized_text
+    assert "[AADHAAR]" in sanitized_text
+    assert "[PAN]" in sanitized_text
+
+
+# Test standalone Aadhaar and PAN detection.
+def test_aadhaar_and_pan_detection():
+    page_text = (
+        "Aadhaar: 1234 5678 9012\n"
+        "PAN: ABCDE1234F"
+    )
+
+    findings = inspect_page(
+        [],
+        page_text,
+    )
+
+    finding_types = {
+        finding["type"]
+        for finding in findings
+    }
+
+    assert "aadhaar" in finding_types
+    assert "pan" in finding_types
 
 
 if __name__ == "__main__":
     test_pii_detection_and_sanitization()
-    print("Privacy test passed.")
+    test_aadhaar_and_pan_detection()
+    print("Privacy tests passed.")

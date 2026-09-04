@@ -3,6 +3,8 @@ REPLACEMENTS = {
     "email": "[EMAIL]",
     "phone": "[PHONE]",
     "credit_card": "[CREDIT_CARD]",
+    "aadhaar": "[AADHAAR]",
+    "pan": "[PAN]",
     "credential": "[REDACTED]",
 }
 
@@ -12,7 +14,9 @@ def sanitize_element(element, findings):
     sanitized = element.copy()
 
     for finding in findings:
-        replacement = REPLACEMENTS.get(finding["type"])
+        replacement = REPLACEMENTS.get(
+            finding["type"]
+        )
 
         if not replacement:
             continue
@@ -68,7 +72,9 @@ def sanitize_page_text(page_text, findings):
 
     for finding in findings:
         value = finding.get("value")
-        replacement = REPLACEMENTS.get(finding.get("type"))
+        replacement = REPLACEMENTS.get(
+            finding.get("type")
+        )
 
         if value and replacement:
             sanitized_text = sanitized_text.replace(
