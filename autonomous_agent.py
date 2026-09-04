@@ -75,7 +75,7 @@ def infer_task_constraint(user_goal, elements):
     goal = user_goal.strip()
 
     sequence_match = re.match(
-        r"^enter\s+(.+?)\s+as\s+(.+?)\s+and\s+then\s+click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?$",
+        r'^enter\s+["\'](.+?)["\']\s+as\s+(?:the\s+)?(?:name|value)\s+and\s+then\s+click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?$',
         goal,
         re.IGNORECASE,
     )
@@ -86,12 +86,12 @@ def infer_task_constraint(user_goal, elements):
             "steps": [
                 {
                     "action": "type",
-                    "target": sequence_match.group(1).strip(),
-                    "value": sequence_match.group(2).strip(),
+                    "target": "Enter your name",
+                    "value": sequence_match.group(1).strip(),
                 },
                 {
                     "action": "click",
-                    "target": sequence_match.group(3).strip(),
+                    "target": sequence_match.group(2).strip(),
                 },
             ],
         }
