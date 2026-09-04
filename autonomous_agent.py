@@ -1,16 +1,19 @@
 # Browser automation and page interaction.
 from playwright.sync_api import sync_playwright
 
+from agent.security.policy import (
+    MAX_ACTIONS_PER_TASK,
+    MAX_REPLANS_PER_TASK,
+    MAX_TASK_RUNTIME_SECONDS,
+    is_action_allowed,
+)
+
 # Browser perception modules.
 from agent.perception.dom import get_dom_elements
 
 # Privacy protection modules.
 from agent.privacy.firewall import inspect_page
-from agent.privacy.sanitizer import (
-    sanitize_page,
-    sanitize_page_text,
-)
-from agent.privacy.visual import find_sensitive_ocr_regions
+from agent.privacy.sanitizer import sanitize_page
 
 # AI action validation module.
 from agent.planner import validate_actions
@@ -23,12 +26,16 @@ import pytesseract
 import requests
 
 # Standard Python utilities.
+import base64
 import io
 import json
 import os
 import re
 import shutil
 import time
+
+# Visual privacy redaction.
+from agent.privacy.visual import create_safe_screenshot
 
 
 # Local Ollama configuration.
@@ -39,22 +46,8 @@ OLLAMA_URL = os.getenv(
 
 OLLAMA_MODEL = os.getenv(
     "OLLAMA_MODEL",
-    "llama3.2:3b",
+    "qwen2.5vl:3b",
 )
-
-
-# Security limits.
-MAX_ACTIONS_PER_TASK = 20
-MAX_REPLANS_PER_TASK = 5
-MAX_TASK_RUNTIME_SECONDS = 120
-MAX_VERIFY_RETRIES = 1
-
-
-# One-time verification failure test.
-TEST_REPLAN = os.getenv(
-    "AGENT_TEST_REPLAN",
-    "0",
-) == "1"
 
 
 # Demo webpage location.
@@ -69,7 +62,7 @@ TEST_PAGE = os.path.join(
 )
 
 
-# Configure Tesseract OCR.
+# Configure Tesseract OCR for the current operating system.
 def configure_tesseract():
     tesseract_path = shutil.which(
         "tesseract"
@@ -115,146 +108,120 @@ def infer_task_constraint(
     elements,
 ):
     goal = user_goal.strip()
-    lower_goal = goal.lower()
 
-    # Handle "search for <value>" tasks.
-    search_match = re.match(
-        r"^\s*search\s+for\s+(.+?)\s*$",
-        goal,
+    # Detect an explicit ordered sequence before handling single-action tasks.
+    sequence_pattern = re.compile(
+        r"type\s+[\"'](.+?)[\"']\s+into\s+(.+?)\s+and\s+click\s+(.+?)\s*$",
         re.IGNORECASE,
     )
 
-    if search_match:
-        value = (
-            search_match.group(1)
-            .strip()
-        )
-
-        input_target = None
-        search_target = None
-
-        for element in elements:
-            if element.get("type") != "input":
-                continue
-
-            placeholder = element.get(
-                "placeholder",
-                "",
-            )
-
-            aria_label = element.get(
-                "aria_label",
-                "",
-            )
-
-            if (
-                "name" in placeholder.lower()
-                or "search" in placeholder.lower()
-                or "name" in aria_label.lower()
-                or "search" in aria_label.lower()
-            ):
-                input_target = (
-                    placeholder
-                    or aria_label
-                )
-
-                break
-
-        for element in elements:
-            if element.get("type") != "button":
-                continue
-
-            text = element.get(
-                "text",
-                "",
-            ).strip()
-
-            aria_label = element.get(
-                "aria_label",
-                "",
-            ).strip()
-
-            if (
-                text.lower() == "search"
-                or aria_label.lower() == "search"
-            ):
-                search_target = (
-                    text
-                    or aria_label
-                )
-
-                break
-
-        if (
-            input_target
-            and search_target
-        ):
-            return {
-                "intent": "sequence",
-                "steps": [
-                    {
-                        "action": "type",
-                        "target": input_target,
-                        "value": value,
-                    },
-                    {
-                        "action": "click",
-                        "target": search_target,
-                    },
-                ],
-            }
-
-    # Handle "find the <button/link>" tasks.
-    find_match = re.match(
-        r"^\s*find\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
-        goal,
-        re.IGNORECASE,
+    sequence_match = sequence_pattern.match(
+        goal
     )
 
-    if find_match:
-        requested_target = (
-            find_match.group(1)
-            .strip()
+    if sequence_match:
+        type_value = (
+            sequence_match.group(1).strip()
+        )
+
+        type_target = (
+            sequence_match.group(2).strip()
+        )
+
+        click_target = (
+            sequence_match.group(3).strip()
+        )
+
+        resolved_type_target = (
+            type_target
+        )
+
+        resolved_click_target = (
+            click_target
         )
 
         for element in elements:
-            if element.get("type") not in {
+            if element.get(
+                "type"
+            ) in {
+                "input",
+                "textarea",
+            }:
+                candidates = [
+                    element.get(
+                        "placeholder",
+                        "",
+                    ),
+                    element.get(
+                        "aria_label",
+                        "",
+                    ),
+                    element.get(
+                        "name",
+                        "",
+                    ),
+                    element.get(
+                        "id",
+                        "",
+                    ),
+                ]
+
+                for candidate in candidates:
+                    if (
+                        candidate
+                        and candidate.strip().lower()
+                        == type_target.lower()
+                    ):
+                        resolved_type_target = (
+                            candidate.strip()
+                        )
+
+                        break
+
+            if element.get(
+                "type"
+            ) in {
                 "button",
                 "link",
             }:
-                continue
+                candidates = [
+                    element.get(
+                        "text",
+                        "",
+                    ),
+                    element.get(
+                        "aria_label",
+                        "",
+                    ),
+                ]
 
-            candidates = [
-                element.get(
-                    "text",
-                    "",
-                ),
-                element.get(
-                    "aria_label",
-                    "",
-                ),
-            ]
+                for candidate in candidates:
+                    if (
+                        candidate
+                        and candidate.strip().lower()
+                        == click_target.lower()
+                    ):
+                        resolved_click_target = (
+                            candidate.strip()
+                        )
 
-            for candidate in candidates:
-                candidate = (
-                    candidate or ""
-                ).strip()
-
-                if (
-                    candidate.lower()
-                    == requested_target.lower()
-                ):
-                    return {
-                        "intent": "click_only",
-                        "target": candidate,
-                    }
+                        break
 
         return {
-            "intent": "click_only",
-            "target": requested_target,
+            "intent": "sequence",
+            "steps": [
+                {
+                    "action": "type",
+                    "target": resolved_type_target,
+                    "value": type_value,
+                },
+                {
+                    "action": "click",
+                    "target": resolved_click_target,
+                },
+            ],
         }
 
-    # Handle "click <target>" tasks.
     click_match = re.match(
         r"^\s*click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
         goal,
@@ -263,12 +230,13 @@ def infer_task_constraint(
 
     if click_match:
         requested_target = (
-            click_match.group(1)
-            .strip()
+            click_match.group(1).strip()
         )
 
         for element in elements:
-            if element.get("type") not in {
+            if element.get(
+                "type"
+            ) not in {
                 "button",
                 "link",
             }:
@@ -286,17 +254,14 @@ def infer_task_constraint(
             ]
 
             for candidate in candidates:
-                candidate = (
-                    candidate or ""
-                ).strip()
-
                 if (
-                    candidate.lower()
+                    candidate
+                    and candidate.strip().lower()
                     == requested_target.lower()
                 ):
                     return {
                         "intent": "click_only",
-                        "target": candidate,
+                        "target": candidate.strip(),
                     }
 
         return {
@@ -304,130 +269,83 @@ def infer_task_constraint(
             "target": requested_target,
         }
 
-    # Use Ollama for genuinely general tasks.
+    type_match = re.match(
+        r'^\s*type\s+["\'](.+?)["\']\s+into\s+(.+?)\s*$',
+        goal,
+        re.IGNORECASE,
+    )
+
+    if type_match:
+        value = type_match.group(
+            1
+        )
+
+        requested_target = (
+            type_match.group(2).strip()
+        )
+
+        for element in elements:
+            if element.get(
+                "type"
+            ) not in {
+                "input",
+                "textarea",
+            }:
+                continue
+
+            candidates = [
+                element.get(
+                    "placeholder",
+                    "",
+                ),
+                element.get(
+                    "aria_label",
+                    "",
+                ),
+                element.get(
+                    "name",
+                    "",
+                ),
+                element.get(
+                    "id",
+                    "",
+                ),
+            ]
+
+            for candidate in candidates:
+                if (
+                    candidate
+                    and candidate.strip().lower()
+                    == requested_target.lower()
+                ):
+                    return {
+                        "intent": "type_only",
+                        "target": candidate.strip(),
+                        "value": value,
+                    }
+
+        return {
+            "intent": "type_only",
+            "target": requested_target,
+            "value": value,
+        }
+
     return {
         "intent": "general",
         "target": "",
     }
 
 
-# Sanitize action history before sending it to the local model.
-def sanitize_action_history(
-    action_history,
-):
-    sanitized = []
-
-    for item in action_history:
-        sanitized.append(
-            {
-                "action": item.get(
-                    "action"
-                ),
-                "target": item.get(
-                    "target"
-                ),
-                "value": (
-                    "[REDACTED]"
-                    if item.get("action")
-                    == "type"
-                    else None
-                ),
-                "result": item.get(
-                    "result"
-                ),
-            }
-        )
-
-    return sanitized
-
-
-# Send sanitized webpage context to Ollama.
+# Send sanitized webpage context and safe visual context to the local AI planner.
 def ask_ollama(
     user_goal,
     elements,
-    page_text,
     task_constraint,
     action_history,
+    safe_screenshot_path,
 ):
-    sanitized_history = (
-        sanitize_action_history(
-            action_history
-        )
-    )
-
-    # Build the exact data allowed to leave the privacy firewall.
-    payload_context = {
-        "user_goal": user_goal,
-        "task_constraint": task_constraint,
-        "safe_page_text": page_text,
-        "safe_ui_elements": elements,
-        "action_history": sanitized_history,
-    }
-
-    # Privacy audit: block known sensitive values.
-    payload_text = json.dumps(
-        payload_context,
-        ensure_ascii=False,
-    )
-
-    forbidden_patterns = [
-        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-        r"(?<!\d)(?:\+91[\s-]?)?[6-9]\d{9}(?!\d)",
-        r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)",
-    ]
-
-    for pattern in forbidden_patterns:
-        if re.search(
-            pattern,
-            payload_text,
-        ):
-            raise RuntimeError(
-                "PRIVACY FIREWALL BLOCKED "
-                "OLLAMA REQUEST: sensitive data "
-                "detected in outbound payload."
-            )
-
-    # Never send credential values to the model.
-    for element in elements:
-        input_type = (
-            element.get("input_type")
-            or ""
-        ).lower()
-
-        if input_type == "password":
-            value = element.get(
-                "value"
-            )
-
-            if value:
-                raise RuntimeError(
-                    "PRIVACY FIREWALL BLOCKED "
-                    "OLLAMA REQUEST: credential "
-                    "value detected in outbound payload."
-                )
-
-    # Print an auditable outbound payload summary.
-    print("\nOLLAMA PRIVACY AUDIT")
-    print("-" * 72)
-    print(
-        "Raw webpage data sent: NO"
-    )
-    print(
-        "Sanitized page text sent: YES"
-    )
-    print(
-        "Sanitized UI elements sent: YES"
-    )
-    print(
-        "Credential values sent: NO"
-    )
-    print(
-        "PII patterns detected in payload: NO"
-    )
-    print("-" * 72)
-
     prompt = f"""
-You are a strict browser automation planner.
+You are a strict browser automation planner operating in a closed-loop agent.
 
 USER GOAL:
 {user_goal}
@@ -435,18 +353,17 @@ USER GOAL:
 TASK CONSTRAINT:
 {json.dumps(task_constraint, indent=2)}
 
-SAFE PAGE TEXT:
-{page_text}
-
-AVAILABLE SAFE UI ELEMENTS:
+CURRENT SAFE UI ELEMENTS:
 {json.dumps(elements, indent=2)}
 
-PREVIOUS ACTION HISTORY:
-{json.dumps(sanitized_history, indent=2)}
+ACTIONS ALREADY EXECUTED:
+{json.dumps(action_history, indent=2)}
 
-Generate ONLY the next browser action required.
+The attached image is a PRIVACY-SAFE screenshot.
+Use it only as visual context for the current webpage.
+Do not infer or reconstruct redacted information.
 
-Allowed actions:
+Choose ONLY the NEXT browser action.
 
 CLICK:
 {{
@@ -462,32 +379,50 @@ TYPE:
 }}
 
 STRICT RULES:
-1. Return ONLY a valid JSON object.
-2. No markdown or explanations.
-3. Generate exactly ONE action.
-4. Every target must exactly match an available UI element.
-5. Never invent a target.
-6. Never invent personal information.
-7. Never invent names, emails, phone numbers, passwords, tokens, or values.
-8. Never use USER_PROVIDED_VALUE.
-9. Never use placeholder values.
-10. Never create TYPE unless the user explicitly supplied the value.
-11. Use the TASK CONSTRAINT as a hard restriction.
-12. Use CLICK only for buttons or links.
-13. Use TYPE only for input or textarea elements.
-14. For click-only tasks, generate only CLICK.
-15. For sequence tasks, generate only the next required step.
-16. Do not repeat an already completed action unless the previous attempt failed.
-17. If required information is missing, return an empty JSON array.
-18. SAFE PAGE TEXT may contain redaction tokens such as [EMAIL], [PHONE], [CREDIT_CARD], and [REDACTED].
-19. Never attempt to recover or infer the original value represented by a redaction token.
+1. Return ONLY a valid JSON array.
+2. The array must contain ZERO or ONE action.
+3. Never return more than one action.
+4. Every target must exactly match a CURRENT SAFE UI ELEMENT.
+5. Never invent targets or personal information.
+6. Never invent names, emails, phone numbers, passwords, tokens, or other values.
+7. Never use placeholder values or USER_PROVIDED_VALUE.
+8. Never create TYPE unless the user explicitly supplied the value.
+9. Use CLICK only for buttons or links.
+10. Use TYPE only for input or textarea elements.
+11. Do not perform prerequisite actions unless explicitly required.
+12. Do not fill forms automatically.
+13. If the goal is already complete, return [].
+14. If required information is missing, return [].
+15. Do not repeat a successfully completed action unless the current page state requires it.
+16. Use the TASK CONSTRAINT as a hard restriction.
+17. Minimize actions.
+18. For click-only tasks, output exactly one CLICK action for the requested target.
+19. For type-only tasks, output exactly one TYPE action for the requested target and exact user-provided value.
+20. For general tasks, output only the single NEXT action required.
+
+Return [] only when the goal is complete or cannot safely continue.
 """
+
+    with open(
+        safe_screenshot_path,
+        "rb",
+    ) as image_file:
+        image_base64 = (
+            base64.b64encode(
+                image_file.read()
+            ).decode(
+                "utf-8"
+            )
+        )
 
     response = requests.post(
         OLLAMA_URL,
         json={
             "model": OLLAMA_MODEL,
             "prompt": prompt,
+            "images": [
+                image_base64
+            ],
             "stream": False,
         },
         timeout=120,
@@ -495,141 +430,154 @@ STRICT RULES:
 
     response.raise_for_status()
 
-    return response.json()["response"]
+    return response.json()[
+        "response"
+    ]
 
 
-# Extract a JSON object or array from the model response.
-def extract_actions(text):
-    text = text.strip()
-
-    object_match = re.search(
-        r"\{.*\}",
-        text,
-        re.DOTALL,
-    )
-
-    if object_match:
-        try:
-            parsed = json.loads(
-                object_match.group()
-            )
-
-            if isinstance(
-                parsed,
-                dict,
-            ):
-                return [parsed]
-
-        except json.JSONDecodeError:
-            pass
-
-    array_match = re.search(
+# Extract a JSON action array from the model response.
+def extract_actions(
+    text,
+):
+    match = re.search(
         r"\[.*\]",
         text,
         re.DOTALL,
     )
 
-    if array_match:
-        try:
-            parsed = json.loads(
-                array_match.group()
-            )
+    if not match:
+        return None
 
-            if isinstance(
-                parsed,
-                list,
-            ):
-                return parsed
+    try:
+        return json.loads(
+            match.group()
+        )
 
-        except json.JSONDecodeError:
-            pass
-
-    return None
+    except json.JSONDecodeError:
+        return None
 
 
-# Capture screenshot and extract OCR text with coordinates.
-def get_ocr_text(page):
+# Capture the current webpage and return structured OCR output.
+def get_ocr_result(
+    page,
+):
     screenshot = page.screenshot()
 
     image = Image.open(
-        io.BytesIO(screenshot)
-    ).convert("RGB")
+        io.BytesIO(
+            screenshot
+        )
+    )
 
-    ocr_data = pytesseract.image_to_data(
+    data = pytesseract.image_to_data(
         image,
         output_type=pytesseract.Output.DICT,
     )
 
-    words = []
     regions = []
+    text_parts = []
 
     for index, text in enumerate(
-        ocr_data["text"]
+        data["text"]
     ):
-        text = text.strip()
+        text = (
+            text
+            or ""
+        ).strip()
 
         if not text:
             continue
 
         try:
             confidence = float(
-                ocr_data["conf"][index]
+                data["conf"][index]
             )
+
         except (
             ValueError,
             TypeError,
         ):
-            confidence = 0
+            confidence = -1
 
-        x = int(
-            ocr_data["left"][index]
-        )
-
-        y = int(
-            ocr_data["top"][index]
-        )
-
-        width = int(
-            ocr_data["width"][index]
-        )
-
-        height = int(
-            ocr_data["height"][index]
-        )
-
-        words.append(text)
+        if confidence < 0:
+            continue
 
         regions.append(
             {
                 "text": text,
                 "confidence": confidence,
-                "block_num": ocr_data["block_num"][index],
-                "par_num": ocr_data["par_num"][index],
-                "line_num": ocr_data["line_num"][index],
+                "block_num": data[
+                    "block_num"
+                ][index],
+                "par_num": data[
+                    "par_num"
+                ][index],
+                "line_num": data[
+                    "line_num"
+                ][index],
                 "box": {
-                    "x": x,
-                    "y": y,
-                    "width": width,
-                    "height": height,
+                    "x": int(
+                        data[
+                            "left"
+                        ][index]
+                    ),
+                    "y": int(
+                        data[
+                            "top"
+                        ][index]
+                    ),
+                    "width": int(
+                        data[
+                            "width"
+                        ][index]
+                    ),
+                    "height": int(
+                        data[
+                            "height"
+                        ][index]
+                    ),
                 },
             }
         )
 
+        text_parts.append(
+            text
+        )
+
     return {
-        "text": " ".join(words),
+        "text": " ".join(
+            text_parts
+        ).strip(),
         "regions": regions,
     }
 
 
-# Display discovered UI elements.
-def print_ui_elements(elements):
-    print("\nUI ELEMENTS")
-    print("-" * 72)
+# Return OCR text for console output.
+def get_ocr_text(
+    page,
+):
+    return get_ocr_result(
+        page
+    )["text"]
+
+
+# Display the DOM elements discovered by the perception layer.
+def print_ui_elements(
+    elements,
+):
+    print(
+        "\nUI ELEMENTS"
+    )
+
+    print(
+        "-" * 72
+    )
 
     if not elements:
         print(
             "No visible interactive elements found."
         )
+
         return
 
     print(
@@ -639,7 +587,9 @@ def print_ui_elements(elements):
         f"{'POSITION':<20}"
     )
 
-    print("-" * 72)
+    print(
+        "-" * 72
+    )
 
     for index, element in enumerate(
         elements,
@@ -651,9 +601,15 @@ def print_ui_elements(elements):
         )
 
         text = (
-            element.get("text")
-            or element.get("aria_label")
-            or element.get("placeholder")
+            element.get(
+                "text"
+            )
+            or element.get(
+                "aria_label"
+            )
+            or element.get(
+                "placeholder"
+            )
             or "-"
         )
 
@@ -669,39 +625,68 @@ def print_ui_elements(elements):
             f"{box.get('height', 0):.0f}"
         )
 
+        text = text[:23]
+
         print(
             f"{index:<4} "
             f"{element_type:<10} "
-            f"{text[:23]:<25} "
+            f"{text:<25} "
             f"{position:<20}"
         )
 
-    print("-" * 72)
+    print(
+        "-" * 72
+    )
 
 
-# Display OCR output.
-def print_ocr_text(text):
-    print("\nOCR TEXT")
-    print("-" * 72)
+# Display OCR output from the current webpage.
+def print_ocr_text(
+    text,
+):
+    print(
+        "\nOCR TEXT"
+    )
+
+    print(
+        "-" * 72
+    )
 
     if text:
-        print(text)
+        print(
+            text
+        )
+
     else:
-        print("No text detected.")
+        print(
+            "No text detected."
+        )
 
-    print("-" * 72)
+    print(
+        "-" * 72
+    )
 
 
-# Display privacy findings.
-def print_privacy_findings(findings):
-    print("\nPRIVACY FIREWALL")
-    print("-" * 72)
+# Display sensitive information detected by the privacy firewall.
+def print_privacy_findings(
+    findings,
+):
+    print(
+        "\nPRIVACY FIREWALL"
+    )
+
+    print(
+        "-" * 72
+    )
 
     if not findings:
         print(
             "No sensitive information detected."
         )
-        print("-" * 72)
+
+        print(
+            "-" * 72
+        )
+
         return
 
     print(
@@ -722,11 +707,13 @@ def print_privacy_findings(findings):
             "value"
         )
 
-        display_value = (
-            "[REDACTED]"
-            if value
-            else "[SENSITIVE ELEMENT]"
-        )
+        if value:
+            display_value = value
+
+        else:
+            display_value = (
+                "[SENSITIVE ELEMENT]"
+            )
 
         print(
             f"{index}. "
@@ -734,56 +721,32 @@ def print_privacy_findings(findings):
             f"{display_value}"
         )
 
-    print("-" * 72)
-
-
-# Display visual privacy findings.
-def print_visual_privacy_findings(
-    findings,
-):
-    print("\nVISUAL PRIVACY FIREWALL")
-    print("-" * 72)
-
-    if not findings:
-        print(
-            "No sensitive OCR regions detected."
-        )
-        print("-" * 72)
-        return
-
     print(
-        f"Sensitive OCR regions detected: "
-        f"{len(findings)}"
+        "-" * 72
     )
 
-    for index, finding in enumerate(
-        findings,
-        start=1,
-    ):
-        finding_type = finding.get(
-            "type",
-            "unknown",
-        )
 
-        print(
-            f"{index}. "
-            f"{finding_type.upper():<15} "
-            f"[REDACTED]"
-        )
+# Display the sanitized context that will be provided to the AI.
+def print_safe_elements(
+    elements,
+):
+    print(
+        "\nSAFE UI CONTEXT"
+    )
 
-    print("-" * 72)
-
-
-# Display sanitized UI context.
-def print_safe_elements(elements):
-    print("\nSAFE UI CONTEXT")
-    print("-" * 72)
+    print(
+        "-" * 72
+    )
 
     if not elements:
         print(
             "No safe UI elements available."
         )
-        print("-" * 72)
+
+        print(
+            "-" * 72
+        )
+
         return
 
     for index, element in enumerate(
@@ -796,15 +759,24 @@ def print_safe_elements(elements):
         )
 
         text = (
-            element.get("text")
-            or element.get("aria_label")
-            or element.get("placeholder")
+            element.get(
+                "text"
+            )
+            or element.get(
+                "aria_label"
+            )
+            or element.get(
+                "placeholder"
+            )
             or "-"
         )
 
-        value = element.get(
-            "value"
-        ) or ""
+        value = (
+            element.get(
+                "value"
+            )
+            or ""
+        )
 
         print(
             f"{index}. "
@@ -813,42 +785,32 @@ def print_safe_elements(elements):
             f"value={value}"
         )
 
-    print("-" * 72)
+    print(
+        "-" * 72
+    )
 
 
-# Capture browser state before an action.
-def capture_state(page):
-    try:
-        body_text = page.locator(
-            "body"
-        ).inner_text()
-    except Exception:
-        body_text = ""
-
-    return {
-        "url": page.url,
-        "body_text": body_text,
-    }
-
-
-# Execute and verify a click action.
+# Execute a validated click action against the real webpage.
 def execute_click(
     page,
     target,
-    before_state,
 ):
-    global TEST_REPLAN
-
     locators = [
-        page.locator("button"),
-        page.locator("a"),
+        page.locator(
+            "button"
+        ),
+        page.locator(
+            "a"
+        ),
     ]
 
     for locator in locators:
         for i in range(
             locator.count()
         ):
-            element = locator.nth(i)
+            element = locator.nth(
+                i
+            )
 
             try:
                 text = (
@@ -861,72 +823,21 @@ def execute_click(
 
                 if (
                     text.lower()
-                    != target.lower()
+                    == target.lower()
                 ):
-                    continue
-
-                print(
-                    f"Clicking: {target}"
-                )
-
-                if TEST_REPLAN:
-                    TEST_REPLAN = False
-
                     print(
-                        "TEST: forcing one verification failure before execution."
+                        f"Clicking: {target}"
                     )
 
-                    return False
+                    element.click()
 
-                # Perform the click.
-                element.click()
-
-                print(
-                    "Click completed."
-                )
-
-                page.wait_for_timeout(
-                    500
-                )
-
-                after_state = capture_state(
-                    page
-                )
-
-                # Verify navigation or page-content change.
-                if (
-                    before_state["url"]
-                    != after_state["url"]
-                ):
                     print(
-                        "Action verification passed."
+                        "Click completed."
                     )
 
                     return True
 
-                if (
-                    before_state["body_text"]
-                    != after_state["body_text"]
-                ):
-                    print(
-                        "Action verification passed."
-                    )
-
-                    return True
-
-                # Browser accepted the click even without visible state change.
-                print(
-                    "Action verification passed: "
-                    "click executed successfully."
-                )
-
-                return True
-
-            except Exception as e:
-                print(
-                    f"Click error: {e}"
-                )
-
+            except Exception:
                 continue
 
     print(
@@ -936,15 +847,19 @@ def execute_click(
     return False
 
 
-# Execute and verify a type action.
+# Execute a validated type action against the real webpage.
 def execute_type(
     page,
     target,
     value,
 ):
     locators = [
-        page.locator("input"),
-        page.locator("textarea"),
+        page.locator(
+            "input"
+        ),
+        page.locator(
+            "textarea"
+        ),
     ]
 
     for locator in locators:
@@ -959,49 +874,51 @@ def execute_type(
                 candidates = [
                     input_element.get_attribute(
                         "placeholder"
-                    ) or "",
+                    )
+                    or "",
                     input_element.get_attribute(
                         "aria-label"
-                    ) or "",
+                    )
+                    or "",
                     input_element.get_attribute(
                         "name"
-                    ) or "",
+                    )
+                    or "",
                     input_element.get_attribute(
                         "id"
-                    ) or "",
+                    )
+                    or "",
                 ]
 
-                if not any(
+                if any(
                     candidate.lower()
                     == target.lower()
                     for candidate in candidates
                     if candidate
                 ):
-                    continue
-
-                print(
-                    f"Typing into: {target}"
-                )
-
-                input_element.fill(
-                    value
-                )
-
-                if (
-                    input_element.input_value()
-                    == value
-                ):
                     print(
-                        "Action verification passed."
+                        f"Typing into: {target}"
                     )
 
-                    return True
+                    input_element.fill(
+                        value
+                    )
 
-                print(
-                    "Action verification failed."
-                )
+                    if (
+                        input_element.input_value()
+                        == value
+                    ):
+                        print(
+                            "Type completed."
+                        )
 
-                return False
+                        return True
+
+                    print(
+                        "Type verification failed."
+                    )
+
+                    return False
 
             except Exception:
                 continue
@@ -1013,105 +930,347 @@ def execute_type(
     return False
 
 
-# Apply deterministic constraints to model actions.
-def enforce_constraint(
-    actions,
-    task_constraint,
-    completed_steps,
+# Capture the target state before a click so verification can detect a real effect.
+def capture_click_state(
+    page,
+    target,
 ):
-    if not actions:
-        return actions
+    target_state = None
 
-    intent = task_constraint.get(
-        "intent"
+    locators = [
+        page.locator(
+            "button"
+        ),
+        page.locator(
+            "a"
+        ),
+    ]
+
+    for locator in locators:
+        for i in range(
+            locator.count()
+        ):
+            element = locator.nth(
+                i
+            )
+
+            try:
+                text = (
+                    element.inner_text().strip()
+                    or element.get_attribute(
+                        "aria-label"
+                    )
+                    or ""
+                )
+
+                if (
+                    text.lower()
+                    == target.lower()
+                ):
+                    target_state = {
+                        "visible": element.is_visible(),
+                        "enabled": element.is_enabled(),
+                        "aria_expanded": (
+                            element.get_attribute(
+                                "aria-expanded"
+                            )
+                            or ""
+                        ),
+                        "aria_pressed": (
+                            element.get_attribute(
+                                "aria-pressed"
+                            )
+                            or ""
+                        ),
+                        "class": (
+                            element.get_attribute(
+                                "class"
+                            )
+                            or ""
+                        ),
+                    }
+
+                    break
+
+            except Exception:
+                continue
+
+        if target_state is not None:
+            break
+
+    try:
+        body_text = page.locator(
+            "body"
+        ).inner_text()
+
+    except Exception:
+        body_text = ""
+
+    try:
+        body_html = page.locator(
+            "body"
+        ).inner_html()
+
+    except Exception:
+        body_html = ""
+
+    return {
+        "url": page.url,
+        "body_text": body_text,
+        "body_html": body_html,
+        "target": target_state,
+    }
+
+
+# Verify that a browser action produced the expected result.
+def verify_action(
+    page,
+    action,
+    before_state=None,
+):
+    action_type = action.get(
+        "action"
     )
 
-    if intent == "click_only":
-        if len(actions) != 1:
-            return None
+    target = action.get(
+        "target",
+        "",
+    )
 
-        actions[0]["action"] = "click"
-
-        actions[0]["target"] = (
-            task_constraint["target"]
+    if action_type == "type":
+        value = action.get(
+            "value",
+            "",
         )
 
-        return actions
-
-    if intent == "type_only":
-        if len(actions) != 1:
-            return None
-
-        actions[0]["action"] = "type"
-
-        actions[0]["target"] = (
-            task_constraint["target"]
-        )
-
-        actions[0]["value"] = (
-            task_constraint["value"]
-        )
-
-        return actions
-
-    if intent == "sequence":
-        steps = task_constraint[
-            "steps"
+        locators = [
+            page.locator(
+                "input"
+            ),
+            page.locator(
+                "textarea"
+            ),
         ]
 
-        if completed_steps >= len(
-            steps
-        ):
-            return []
+        for locator in locators:
+            for i in range(
+                locator.count()
+            ):
+                element = locator.nth(
+                    i
+                )
 
-        expected = steps[
-            completed_steps
-        ]
+                try:
+                    candidates = [
+                        element.get_attribute(
+                            "placeholder"
+                        )
+                        or "",
+                        element.get_attribute(
+                            "aria-label"
+                        )
+                        or "",
+                        element.get_attribute(
+                            "name"
+                        )
+                        or "",
+                        element.get_attribute(
+                            "id"
+                        )
+                        or "",
+                    ]
 
-        matching = [
-            action
-            for action in actions
-            if (
-                action.get("action")
-                or ""
-            ).lower()
-            == expected["action"]
-        ]
+                    if any(
+                        candidate.lower()
+                        == target.lower()
+                        for candidate in candidates
+                        if candidate
+                    ):
+                        actual_value = (
+                            element.input_value()
+                        )
 
-        if not matching:
-            return None
+                        return (
+                            actual_value
+                            == value
+                        )
 
-        action = matching[0]
+                except Exception:
+                    continue
 
-        action["action"] = expected[
-            "action"
-        ]
+        return False
 
-        action["target"] = expected[
-            "target"
-        ]
+    if action_type == "click":
+        # Require a real target state captured before execution.
+        if not before_state:
+            return False
 
         if (
-            expected["action"]
-            == "type"
+            before_state.get(
+                "target"
+            )
+            is None
         ):
-            action["value"] = expected[
-                "value"
-            ]
+            return False
 
-        return [action]
+        try:
+            page.wait_for_timeout(
+                500
+            )
 
-    return actions
+        except Exception:
+            pass
+
+        after_state = (
+            capture_click_state(
+                page,
+                target,
+            )
+        )
+
+        # Navigation proves that the click caused a page transition.
+        if (
+            after_state.get(
+                "url"
+            )
+            != before_state.get(
+                "url"
+            )
+        ):
+            return True
+
+        # Page text changes prove that the click changed visible content.
+        if (
+            after_state.get(
+                "body_text"
+            )
+            != before_state.get(
+                "body_text"
+            )
+        ):
+            return True
+
+        # DOM changes prove that the click changed page structure.
+        if (
+            after_state.get(
+                "body_html"
+            )
+            != before_state.get(
+                "body_html"
+            )
+        ):
+            return True
+
+        before_target = (
+            before_state.get(
+                "target"
+            )
+            or {}
+        )
+
+        after_target = (
+            after_state.get(
+                "target"
+            )
+            or {}
+        )
+
+        # Target state changes prove that the intended control reacted.
+        for key in [
+            "visible",
+            "enabled",
+            "aria_expanded",
+            "aria_pressed",
+            "class",
+        ]:
+            if (
+                before_target.get(
+                    key
+                )
+                != after_target.get(
+                    key
+                )
+            ):
+                return True
+
+        # No observable change means the click cannot be verified.
+        return False
+
+    return False
 
 
-# Main closed-loop browser agent.
+# Re-perceive the page and create a privacy-safe screenshot.
+def reperceive_page(
+    page,
+):
+    elements = get_dom_elements(
+        page
+    )
+
+    ocr_result = get_ocr_result(
+        page
+    )
+
+    page_text = page.locator(
+        "body"
+    ).inner_text()
+
+    privacy_findings = inspect_page(
+        elements,
+        page_text,
+    )
+
+    safe_elements = sanitize_page(
+        elements,
+        privacy_findings,
+    )
+
+    screenshot_path = os.path.join(
+        BASE_DIR,
+        ".privacy_safe_screenshot.png",
+    )
+
+    raw_screenshot_path = os.path.join(
+        BASE_DIR,
+        ".privacy_raw_screenshot.png",
+    )
+
+    page.screenshot(
+        path=raw_screenshot_path,
+    )
+
+    create_safe_screenshot(
+        raw_screenshot_path,
+        elements,
+        privacy_findings,
+        ocr_result,
+        screenshot_path,
+    )
+
+    try:
+        os.remove(
+            raw_screenshot_path
+        )
+
+    except OSError:
+        pass
+
+    return (
+        elements,
+        ocr_result["text"],
+        privacy_findings,
+        safe_elements,
+        screenshot_path,
+    )
+
+
+# Run the complete perception, privacy, planning, validation, and execution pipeline.
 def main():
-    global TEST_REPLAN
-
     configure_tesseract()
 
     print(
-        "\n" + "=" * 72
+        "\n"
+        + "=" * 72
     )
 
     print(
@@ -1133,17 +1292,11 @@ def main():
             "\nTest page not found:"
         )
 
-        print(TEST_PAGE)
+        print(
+            TEST_PAGE
+        )
 
         return
-
-    start_time = time.time()
-
-    action_count = 0
-    replan_count = 0
-    completed_steps = 0
-
-    action_history = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -1158,7 +1311,8 @@ def main():
         )
 
         page.goto(
-            "file://" + TEST_PAGE
+            "file://"
+            + TEST_PAGE
         )
 
         page.wait_for_timeout(
@@ -1178,7 +1332,13 @@ def main():
             "=" * 72
         )
 
-        elements = get_dom_elements(
+        (
+            elements,
+            ocr_text,
+            privacy_findings,
+            safe_elements,
+            safe_screenshot_path,
+        ) = reperceive_page(
             page
         )
 
@@ -1186,28 +1346,8 @@ def main():
             elements
         )
 
-        # Initial OCR perception.
-        ocr_result = get_ocr_text(
-            page
-        )
-
-        ocr_text = ocr_result[
-            "text"
-        ]
-
         print_ocr_text(
             ocr_text
-        )
-
-        # Initial visual privacy analysis.
-        visual_privacy_findings = (
-            find_sensitive_ocr_regions(
-                ocr_result
-            )
-        )
-
-        print_visual_privacy_findings(
-            visual_privacy_findings
         )
 
         # Initial privacy analysis.
@@ -1219,29 +1359,15 @@ def main():
             "=" * 72
         )
 
-        page_text = page.locator(
-            "body"
-        ).inner_text()
-
-        privacy_findings = inspect_page(
-            elements,
-            page_text,
-        )
-
         print_privacy_findings(
             privacy_findings
-        )
-
-        safe_elements = sanitize_page(
-            elements,
-            privacy_findings,
         )
 
         print_safe_elements(
             safe_elements
         )
 
-        # Receive user task.
+        # Receive the natural-language browser task.
         user_goal = input(
             "\nEnter task:\n> "
         ).strip()
@@ -1255,13 +1381,27 @@ def main():
 
             return
 
-        # Determine deterministic task constraints.
+        # Initialize deterministic task constraints.
         task_constraint = (
             infer_task_constraint(
                 user_goal,
                 safe_elements,
             )
         )
+
+        action_count = 0
+
+        replan_count = 0
+
+        task_start_time = (
+            time.monotonic()
+        )
+
+        action_history = []
+
+        all_success = True
+
+        task_completed = False
 
         print(
             "\nAGENT LOOP"
@@ -1276,22 +1416,24 @@ def main():
             f"{task_constraint}"
         )
 
-        task_completed = False
-
         # Closed-loop planning and execution.
         while True:
-            runtime = (
-                time.time()
-                - start_time
+            elapsed = (
+                time.monotonic()
+                - task_start_time
             )
 
             if (
-                runtime
+                elapsed
                 > MAX_TASK_RUNTIME_SECONDS
             ):
                 print(
-                    "Task runtime limit exceeded."
+                    f"SECURITY STOP: "
+                    f"Task runtime limit reached "
+                    f"({MAX_TASK_RUNTIME_SECONDS}s)."
                 )
+
+                all_success = False
 
                 break
 
@@ -1300,8 +1442,12 @@ def main():
                 >= MAX_ACTIONS_PER_TASK
             ):
                 print(
-                    "Action limit exceeded."
+                    f"SECURITY STOP: "
+                    f"Maximum action limit reached "
+                    f"({MAX_ACTIONS_PER_TASK})."
                 )
+
+                all_success = False
 
                 break
 
@@ -1310,71 +1456,14 @@ def main():
                 > MAX_REPLANS_PER_TASK
             ):
                 print(
-                    "Replan limit exceeded."
+                    f"SECURITY STOP: "
+                    f"Maximum replan limit reached "
+                    f"({MAX_REPLANS_PER_TASK})."
                 )
+
+                all_success = False
 
                 break
-
-            # Perceive current page before every plan.
-            elements = get_dom_elements(
-                page
-            )
-
-            page_text = page.locator(
-                "body"
-            ).inner_text()
-
-            privacy_findings = inspect_page(
-                elements,
-                page_text,
-            )
-
-            safe_elements = sanitize_page(
-                elements,
-                privacy_findings,
-            )
-
-            safe_page_text = (
-                sanitize_page_text(
-                    page_text,
-                    privacy_findings,
-                )
-            )
-
-            # Detect sensitive visual regions before planning.
-            ocr_result = get_ocr_text(
-                page
-            )
-
-            visual_privacy_findings = (
-                find_sensitive_ocr_regions(
-                    ocr_result
-                )
-            )
-
-            if visual_privacy_findings:
-                print(
-                    f"Visual privacy regions "
-                    f"blocked: "
-                    f"{len(visual_privacy_findings)}"
-                )
-
-            # Determine the next required sequence step.
-            if (
-                task_constraint["intent"]
-                == "sequence"
-            ):
-                steps = task_constraint[
-                    "steps"
-                ]
-
-                if (
-                    completed_steps
-                    >= len(steps)
-                ):
-                    task_completed = True
-
-                    break
 
             print(
                 f"\nPLAN CYCLE "
@@ -1385,114 +1474,316 @@ def main():
                 "-" * 72
             )
 
-            # Use deterministic steps directly when the task constraint is known.
-            if (
-                task_constraint["intent"]
-                == "sequence"
-            ):
-                actions = [
-                    task_constraint[
-                        "steps"
-                    ][
-                        completed_steps
-                    ].copy()
-                ]
+            print(
+                "Sending sanitized UI context to Ollama..."
+            )
 
-                print(
-                    "Using deterministic task step."
+            try:
+                raw_response = ask_ollama(
+                    user_goal,
+                    safe_elements,
+                    task_constraint,
+                    action_history,
+                    safe_screenshot_path,
                 )
 
-            else:
+            except Exception as e:
                 print(
-                    "Sending sanitized UI "
-                    "context to Ollama..."
+                    f"\nOllama error: {e}"
                 )
 
-                try:
-                    raw_response = (
-                        ask_ollama(
-                            user_goal,
-                            safe_elements,
-                            safe_page_text,
-                            task_constraint,
-                            action_history,
-                        )
-                    )
+                all_success = False
 
-                except Exception as e:
-                    print(
-                        f"Ollama error: {e}"
-                    )
+                break
 
-                    break
+            actions = extract_actions(
+                raw_response
+            )
 
-                actions = extract_actions(
+            if actions is None:
+                print(
+                    "\nCould not parse Ollama action plan."
+                )
+
+                print(
                     raw_response
                 )
 
-                if actions is None:
-                    print(
-                        "Could not parse "
-                        "Ollama action plan."
+                all_success = False
+
+                break
+
+            # Explicit sequences must continue even when Ollama returns an empty plan.
+            if not actions:
+                if task_constraint[
+                    "intent"
+                ] == "sequence":
+                    step_index = len(
+                        action_history
                     )
 
-                    replan_count += 1
+                    expected_steps = (
+                        task_constraint.get(
+                            "steps",
+                            [],
+                        )
+                    )
 
-                    continue
+                    if (
+                        step_index
+                        >= len(
+                            expected_steps
+                        )
+                    ):
+                        task_completed = True
 
-                actions = enforce_constraint(
-                    actions,
-                    task_constraint,
-                    completed_steps,
+                        break
+
+                    action = expected_steps[
+                        step_index
+                    ]
+
+                    actions = [
+                        action
+                    ]
+
+                    print(
+                        "\nPlanner returned no action. "
+                        "Using required sequence step: "
+                        f"{action['action'].upper()} "
+                        f"{action['target']}"
+                    )
+
+                elif task_constraint[
+                    "intent"
+                ] in {
+                    "click_only",
+                    "type_only",
+                }:
+                    print(
+                        "\nNo safe action generated "
+                        "for the requested task."
+                    )
+
+                    all_success = False
+
+                    break
+
+                else:
+                    print(
+                        "\nPlanner returned no action. "
+                        "Task complete or unable to continue."
+                    )
+
+                    task_completed = True
+
+                    break
+
+            # For explicit sequences, only the exact expected next action is eligible.
+            if task_constraint[
+                "intent"
+            ] == "sequence":
+                step_index = len(
+                    action_history
                 )
 
-                if actions is None:
-                    print(
-                        "ACTION POLICY FAILED"
-                    )
-
-                    replan_count += 1
-
-                    continue
-
-            if not actions:
-                if (
+                expected_steps = (
                     task_constraint[
-                        "intent"
+                        "steps"
                     ]
-                    == "sequence"
-                    and completed_steps
+                )
+
+                if (
+                    step_index
                     >= len(
-                        task_constraint[
-                            "steps"
-                        ]
+                        expected_steps
                     )
                 ):
                     task_completed = True
 
-                else:
-                    print(
-                        "No valid action generated."
-                    )
+                    break
 
-                break
-
-            # Validate exactly one next action.
-            if len(actions) != 1:
-                print(
-                    "Planner must generate "
-                    "exactly one next action."
+                expected = (
+                    expected_steps[
+                        step_index
+                    ]
                 )
 
-                replan_count += 1
+                # Require action type, target, and TYPE value to match the expected step.
+                matching_actions = [
+                    candidate
+                    for candidate in actions
+                    if (
+                        candidate.get(
+                            "action"
+                        )
+                        == expected[
+                            "action"
+                        ]
+                        and candidate.get(
+                            "target",
+                            "",
+                        ).strip().lower()
+                        == expected.get(
+                            "target",
+                            "",
+                        ).strip().lower()
+                        and (
+                            expected[
+                                "action"
+                            ]
+                            != "type"
+                            or candidate.get(
+                                "value"
+                            )
+                            == expected.get(
+                                "value"
+                            )
+                        )
+                    )
+                ]
 
-                continue
+                if not matching_actions:
+                    print(
+                        "\nACTION POLICY FAILED"
+                    )
 
-            action = actions[0]
+                    print(
+                        "-" * 72
+                    )
 
-            valid, errors = (
+                    print(
+                        "Expected next action:"
+                    )
+
+                    print(
+                        json.dumps(
+                            expected,
+                            indent=2,
+                        )
+                    )
+
+                    print(
+                        "Planner returned:"
+                    )
+
+                    print(
+                        json.dumps(
+                            actions,
+                            indent=2,
+                        )
+                    )
+
+                    print(
+                        "-" * 72
+                    )
+
+                    all_success = False
+
+                    break
+
+                action = (
+                    matching_actions[
+                        0
+                    ]
+                )
+
+                if len(
+                    actions
+                ) > 1:
+                    print(
+                        "Planner returned extra actions; "
+                        "discarding them."
+                    )
+
+            else:
+                if len(
+                    actions
+                ) != 1:
+                    print(
+                        "\nACTION POLICY FAILED"
+                    )
+
+                    print(
+                        "-" * 72
+                    )
+
+                    print(
+                        "Closed-loop planner must return exactly one action."
+                    )
+
+                    print(
+                        "-" * 72
+                    )
+
+                    all_success = False
+
+                    break
+
+                action = actions[
+                    0
+                ]
+
+            # Enforce deterministic click-only intent.
+            if task_constraint[
+                "intent"
+            ] == "click_only":
+                if action.get(
+                    "action"
+                ) != "click":
+                    print(
+                        "\nACTION POLICY FAILED"
+                    )
+
+                    print(
+                        "Click-only task cannot contain another action."
+                    )
+
+                    all_success = False
+
+                    break
+
+                action[
+                    "target"
+                ] = task_constraint[
+                    "target"
+                ]
+
+            # Enforce deterministic type-only intent.
+            if task_constraint[
+                "intent"
+            ] == "type_only":
+                if action.get(
+                    "action"
+                ) != "type":
+                    print(
+                        "\nACTION POLICY FAILED"
+                    )
+
+                    print(
+                        "Type-only task must contain a TYPE action."
+                    )
+
+                    all_success = False
+
+                    break
+
+                action[
+                    "target"
+                ] = task_constraint[
+                    "target"
+                ]
+
+                action[
+                    "value"
+                ] = task_constraint[
+                    "value"
+                ]
+
+            # Validate the single action against current DOM state.
+            valid, validation_errors = (
                 validate_actions(
-                    actions,
+                    [action],
                     elements,
                 )
             )
@@ -1502,18 +1793,39 @@ def main():
                     "\nACTION VALIDATION FAILED"
                 )
 
-                for error in errors:
-                    print(error)
+                print(
+                    "-" * 72
+                )
 
-                replan_count += 1
+                for error in validation_errors:
+                    print(
+                        error
+                    )
 
-                continue
+                print(
+                    "-" * 72
+                )
 
-            print(
-                f"Action selected: "
-                f"{action.get('action').upper()} "
-                f"{action.get('target')}"
+                all_success = False
+
+                break
+
+            # Enforce security capability policy.
+            allowed, reason = (
+                is_action_allowed(
+                    action
+                )
             )
+
+            if not allowed:
+                print(
+                    f"SECURITY BLOCK: "
+                    f"{reason}"
+                )
+
+                all_success = False
+
+                break
 
             action_type = action.get(
                 "action"
@@ -1523,18 +1835,34 @@ def main():
                 "target"
             )
 
-            # Capture state before execution.
-            before_state = capture_state(
-                page
+            print(
+                f"Action selected: "
+                f"{action_type.upper()} "
+                f"{target}"
             )
 
-            success = False
+            if action_type == "type":
+                print(
+                    f"Value: "
+                    f"{action.get('value', '')}"
+                )
 
+            # Capture the intended target state before executing a click.
+            click_before_state = None
+
+            if action_type == "click":
+                click_before_state = (
+                    capture_click_state(
+                        page,
+                        target,
+                    )
+                )
+
+            # Execute exactly one validated action.
             if action_type == "click":
                 success = execute_click(
                     page,
                     target,
-                    before_state,
                 )
 
             elif action_type == "type":
@@ -1547,125 +1875,115 @@ def main():
                     ),
                 )
 
-            if success:
-                action_count += 1
-
-                action_history.append(
-                    {
-                        "action": action_type,
-                        "target": target,
-                        "value": (
-                            action.get(
-                                "value"
-                            )
-                            if action_type
-                            == "type"
-                            else None
-                        ),
-                        "result": "success",
-                    }
-                )
-
+            else:
                 print(
-                    f"Action completed. "
-                    f"Total actions: "
-                    f"{action_count}"
+                    f"Unsupported action: "
+                    f"{action_type}"
                 )
 
-                # Check single-action task completion.
-                if (
-                    task_constraint[
-                        "intent"
-                    ]
-                    in {
-                        "click_only",
-                        "type_only",
-                    }
+                success = False
+
+            if not success:
+                print(
+                    "Action execution failed."
+                )
+
+                all_success = False
+
+                break
+
+            action_count += 1
+
+            print(
+                f"Action completed. "
+                f"Total actions: "
+                f"{action_count}"
+            )
+
+            page.wait_for_timeout(
+                500
+            )
+
+            # Verify the action before allowing another planning cycle.
+            verified = verify_action(
+                page,
+                action,
+                click_before_state,
+            )
+
+            if not verified:
+                print(
+                    "Action verification failed."
+                )
+
+                all_success = False
+
+                break
+
+            print(
+                "Action verification passed."
+            )
+
+            action_history.append(
+                action.copy()
+            )
+
+            # Explicit one-step tasks are complete after successful execution.
+            if task_constraint[
+                "intent"
+            ] in {
+                "click_only",
+                "type_only",
+            }:
+                task_completed = True
+
+                break
+
+            # Complete an explicit sequence after all required steps execute.
+            if task_constraint[
+                "intent"
+            ] == "sequence":
+                if len(
+                    action_history
+                ) >= len(
+                    task_constraint.get(
+                        "steps",
+                        [],
+                    )
                 ):
                     task_completed = True
 
                     break
 
-                # Advance only after a successful sequence step.
-                if (
-                    task_constraint[
-                        "intent"
-                    ]
-                    == "sequence"
-                ):
-                    completed_steps += 1
+            # Re-perceive before the next planning cycle.
+            print(
+                "Re-perceiving webpage..."
+            )
 
-                    if (
-                        completed_steps
-                        >= len(
-                            task_constraint[
-                                "steps"
-                            ]
-                        )
-                    ):
-                        task_completed = True
-
-                        break
-
-                # Re-perceive and plan again.
-                replan_count += 1
-
-                print(
-                    f"Security counters: "
-                    f"actions={action_count}, "
-                    f"replans={replan_count}, "
-                    f"runtime={time.time() - start_time:.2f}s"
-                )
-
-                continue
-
-            # Record failed action without sensitive values.
-            action_history.append(
-                {
-                    "action": action_type,
-                    "target": target,
-                    "value": (
-                        "[REDACTED]"
-                        if action_type == "type"
-                        else None
-                    ),
-                    "result": (
-                        "verification_failed"
-                    ),
-                }
+            (
+                elements,
+                ocr_text,
+                privacy_findings,
+                safe_elements,
+                safe_screenshot_path,
+            ) = reperceive_page(
+                page
             )
 
             print(
-                "Action verification failed."
+                f"Perception updated: "
+                f"{len(elements)} UI element(s)."
             )
 
             replan_count += 1
 
-            print(
-                f"Security counters: "
-                f"actions={action_count}, "
-                f"replans={replan_count}, "
-                f"runtime={time.time() - start_time:.2f}s"
-            )
-
-            # Re-perception happens at the top of the loop.
-
-        # Final status.
+        # Report final security state.
         print(
-            "\n" + "=" * 72
-        )
-
-        if task_completed:
-            print(
-                "                    TASK COMPLETED"
-            )
-        else:
-            print(
-                "                      TASK FAILED"
-            )
-
-        print(
-            "=" * 72
+            f"Security counters: "
+            f"actions={action_count}, "
+            f"replans={replan_count}, "
+            f"runtime="
+            f"{time.monotonic() - task_start_time:.2f}s"
         )
 
         print(
@@ -1676,40 +1994,65 @@ def main():
             "-" * 72
         )
 
-        if not action_history:
-            print(
-                "No actions executed."
-            )
-
-        else:
-            for index, item in enumerate(
+        if action_history:
+            for number, action in enumerate(
                 action_history,
                 start=1,
             ):
-                action_name = item.get(
-                    "action",
-                    "",
-                ).upper()
+                action_type = (
+                    action.get(
+                        "action",
+                        "",
+                    )
+                    .upper()
+                )
 
-                target = item.get(
+                target = action.get(
                     "target",
                     "",
                 )
 
-                result = item.get(
-                    "result",
-                    "",
-                )
+                if action_type == "TYPE":
+                    print(
+                        f"{number}. "
+                        f"TYPE "
+                        f"{target} -> "
+                        f"{action.get('value', '')}"
+                    )
 
-                print(
-                    f"{index}. "
-                    f"{action_name:<6} "
-                    f"{target:<25} "
-                    f"{result}"
-                )
+                else:
+                    print(
+                        f"{number}. "
+                        f"{action_type} "
+                        f"{target}"
+                    )
+
+        else:
+            print(
+                "No actions executed."
+            )
+
+        # Result.
+        print(
+            "\n"
+            + "=" * 72
+        )
+
+        if (
+            all_success
+            and task_completed
+        ):
+            print(
+                "                    TASK COMPLETED"
+            )
+
+        else:
+            print(
+                "                      TASK FAILED"
+            )
 
         print(
-            "-" * 72
+            "=" * 72
         )
 
         page.wait_for_timeout(
