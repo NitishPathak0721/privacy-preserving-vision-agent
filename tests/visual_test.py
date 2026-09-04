@@ -8,31 +8,43 @@ from PIL import Image
 import pytesseract
 
 
+# Configure local Tesseract executable.
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+if Path(TESSERACT_PATH).exists():
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+
+
 def test_visual_perception():
-    test_page = Path(__file__).resolve().parents[1] / 'demo' / 'test_page.html'
+    test_page = Path(__file__).resolve().parents[1] / "demo" / "test_page.html"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={'width': 1280, 'height': 720})
 
-        page.goto('file://' + str(test_page))
+        page = browser.new_page(
+            viewport={"width": 1280, "height": 720}
+        )
+
+        page.goto("file://" + str(test_page))
         page.wait_for_timeout(500)
 
-        screenshot_path = Path(__file__).resolve().parent / 'test.png'
+        screenshot_path = Path(__file__).resolve().parent / "test.png"
+
         page.screenshot(path=str(screenshot_path))
 
         browser.close()
 
     image = Image.open(screenshot_path)
+
     text = pytesseract.image_to_string(image)
 
-    assert 'Privacy Browser Agent Demo' in text
-    assert 'Profile' in text
-    assert 'Search' in text
+    assert "Privacy Browser Agent Demo" in text
+    assert "Profile" in text
+    assert "Search" in text
 
     screenshot_path.unlink(missing_ok=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_visual_perception()
-    print('Visual perception test passed.')
+    print("Visual perception test passed.")
