@@ -600,6 +600,9 @@ def get_ocr_text(page):
             {
                 "text": text,
                 "confidence": confidence,
+                "block_num": ocr_data["block_num"][index],
+                "par_num": ocr_data["par_num"][index],
+                "line_num": ocr_data["line_num"][index],
                 "box": {
                     "x": x,
                     "y": y,
@@ -613,7 +616,6 @@ def get_ocr_text(page):
         "text": " ".join(words),
         "regions": regions,
     }
-
 
 # Display discovered UI elements.
 def print_ui_elements(elements):
