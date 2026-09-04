@@ -30,10 +30,25 @@ def inspect_element(element):
     return findings
 
 
-def inspect_page(elements):
+def inspect_text(text):
+    findings = []
+
+    for finding in detect_pii(text or ""):
+        findings.append({
+            "type": finding["type"],
+            "value": finding["value"],
+            "element": None,
+        })
+
+    return findings
+
+
+def inspect_page(elements, page_text=""):
     findings = []
 
     for element in elements:
         findings.extend(inspect_element(element))
+
+    findings.extend(inspect_text(page_text))
 
     return findings

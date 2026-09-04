@@ -28,8 +28,14 @@ import time
 
 
 # Local Ollama configuration.
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL",
+    "http://localhost:11434/api/generate",
+)
+OLLAMA_MODEL = os.getenv(
+    "OLLAMA_MODEL",
+    "llama3.2:3b",
+)
 
 # Security limits.
 MAX_ACTIONS_PER_TASK = 20
@@ -42,7 +48,11 @@ TEST_REPLAN = os.getenv("AGENT_TEST_REPLAN", "0") == "1"
 
 # Demo webpage location.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEST_PAGE = os.path.join(BASE_DIR, "demo", "test_page.html")
+TEST_PAGE = os.path.join(
+    BASE_DIR,
+    "demo",
+    "test_page.html",
+)
 
 
 # Configure Tesseract OCR.
@@ -115,7 +125,11 @@ def infer_task_constraint(user_goal, elements):
             ]
 
             for candidate in candidates:
-                if candidate and candidate.strip().lower() == requested_target.lower():
+                if (
+                    candidate
+                    and candidate.strip().lower()
+                    == requested_target.lower()
+                ):
                     return {
                         "intent": "click_only",
                         "target": candidate.strip(),
@@ -385,12 +399,10 @@ def print_privacy_findings(findings):
             "unknown",
         )
 
-        value = finding.get(
-            "value"
-        )
+        value = finding.get("value")
 
         display_value = (
-            value
+            "[REDACTED]"
             if value
             else "[SENSITIVE ELEMENT]"
         )
@@ -462,6 +474,7 @@ def capture_state(page):
 # Execute and verify a click action.
 def execute_click(page, target, before_state):
     global TEST_REPLAN
+
     locators = [
         page.locator("button"),
         page.locator("a"),
@@ -612,23 +625,19 @@ def execute_type(page, target, value):
 def enforce_constraint(
     actions,
     task_constraint,
-    action_history,
+    completed_steps,
 ):
     if not actions:
         return actions
 
-    intent = task_constraint.get(
-        "intent"
-    )
+    intent = task_constraint.get("intent")
 
     if intent == "click_only":
         if len(actions) != 1:
             return None
 
         actions[0]["action"] = "click"
-        actions[0]["target"] = (
-            task_constraint["target"]
-        )
+        actions[0]["target"] = task_constraint["target"]
 
         return actions
 
@@ -637,30 +646,18 @@ def enforce_constraint(
             return None
 
         actions[0]["action"] = "type"
-        actions[0]["target"] = (
-            task_constraint["target"]
-        )
-        actions[0]["value"] = (
-            task_constraint["value"]
-        )
+        actions[0]["target"] = task_constraint["target"]
+        actions[0]["value"] = task_constraint["value"]
 
         return actions
 
     if intent == "sequence":
-        completed_steps = len(
-            action_history
-        )
-
-        steps = task_constraint[
-            "steps"
-        ]
+        steps = task_constraint["steps"]
 
         if completed_steps >= len(steps):
             return []
 
-        expected = steps[
-            completed_steps
-        ]
+        expected = steps[completed_steps]
 
         matching = [
             action
@@ -674,18 +671,11 @@ def enforce_constraint(
 
         action = matching[0]
 
-        action["action"] = (
-            expected["action"]
-        )
-
-        action["target"] = (
-            expected["target"]
-        )
+        action["action"] = expected["action"]
+        action["target"] = expected["target"]
 
         if expected["action"] == "type":
-            action["value"] = (
-                expected["value"]
-            )
+            action["value"] = expected["value"]
 
         return [action]
 
@@ -711,6 +701,7 @@ def main():
     start_time = time.time()
     action_count = 0
     replan_count = 0
+    completed_steps = 0
     action_history = []
 
     with sync_playwright() as p:
@@ -758,7 +749,8 @@ def main():
         print("=" * 72)
 
         privacy_findings = inspect_page(
-            elements
+            elements,
+            page.locator("body").inner_text(),
         )
 
         print_privacy_findings(
@@ -767,7 +759,7 @@ def main():
 
         safe_elements = sanitize_page(
             elements,
-            privacy_findings
+            privacy_findings,
         )
 
         print_safe_elements(
@@ -831,30 +823,20 @@ def main():
             )
 
             privacy_findings = inspect_page(
-                elements
+                elements,
+                page.locator("body").inner_text(),
             )
 
             safe_elements = sanitize_page(
                 elements,
-                privacy_findings
+                privacy_findings,
             )
 
-            # Determine the next required step.
-            if (
-                task_constraint["intent"]
-                == "sequence"
-            ):
-                completed_steps = len(
-                    action_history
-                )
+            # Determine the next required sequence step.
+            if task_constraint["intent"] == "sequence":
+                steps = task_constraint["steps"]
 
-                steps = task_constraint[
-                    "steps"
-                ]
-
-                if completed_steps >= len(
-                    steps
-                ):
+                if completed_steps >= len(steps):
                     task_completed = True
                     break
 
@@ -864,6 +846,7 @@ def main():
             )
 
             print("-" * 72)
+
             print(
                 "Sending sanitized UI "
                 "context to Ollama..."
@@ -899,7 +882,7 @@ def main():
             actions = enforce_constraint(
                 actions,
                 task_constraint,
-                action_history,
+                completed_steps,
             )
 
             if actions is None:
@@ -914,15 +897,12 @@ def main():
                 if (
                     task_constraint["intent"]
                     == "sequence"
-                    and len(action_history)
+                    and completed_steps
                     >= len(
-                        task_constraint[
-                            "steps"
-                        ]
+                        task_constraint["steps"]
                     )
                 ):
                     task_completed = True
-
                 else:
                     print(
                         "No valid action generated."
@@ -944,7 +924,7 @@ def main():
 
             valid, errors = validate_actions(
                 actions,
-                elements
+                elements,
             )
 
             if not valid:
@@ -1021,30 +1001,20 @@ def main():
                     f"{action_count}"
                 )
 
-                # Check click-only completion.
-                if task_constraint["intent"] == "click_only":
-                    task_completed = True
-                    break
-
-                # Check click-only completion.
-                if task_constraint["intent"] == "click_only":
-                    task_completed = True
-                    break
-
                 # Check single-action task completion.
-                if task_constraint["intent"] in {"click_only", "type_only"}:
+                if task_constraint["intent"] in {
+                    "click_only",
+                    "type_only",
+                }:
                     task_completed = True
                     break
 
-                # Check sequence completion.
-                if (
-                    task_constraint["intent"]
-                    == "sequence"
-                ):
-                    if len(action_history) >= len(
-                        task_constraint[
-                            "steps"
-                        ]
+                # Advance only after a successful sequence step.
+                if task_constraint["intent"] == "sequence":
+                    completed_steps += 1
+
+                    if completed_steps >= len(
+                        task_constraint["steps"]
                     ):
                         task_completed = True
                         break
@@ -1109,7 +1079,6 @@ def main():
 
         if not action_history:
             print("No actions executed.")
-
         else:
             for index, item in enumerate(
                 action_history,

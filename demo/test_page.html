@@ -2,14 +2,24 @@
 <html>
 
 <head>
-    <title>Browser Agent Demo</title>
+    <title>Privacy Browser Agent Demo</title>
 </head>
 
 <body>
 
-    <h1>Browser Agent Demo</h1>
+    <h1>Privacy Browser Agent Demo</h1>
+
+    <h2>Profile</h2>
+
+    <p>Name: Shivansh Srivastava</p>
+    <p>Email: shivansh@example.com</p>
+    <p>Phone: +919876543210</p>
 
     <input id="name" type="text" placeholder="Enter your name">
+
+    <input id="password" type="password" placeholder="Enter password">
+
+    <p>Card: 4111 1111 1111 1111</p>
 
     <button id="search" onclick="document.getElementById('result').innerText = 'Search completed successfully!'">
         Search
@@ -20,15 +30,8 @@
     </button>
 
     <p id="result">
-        Welcome to the browser agent testing page.
+        Welcome to the privacy browser agent testing page.
     </p>
-
-    <script>
-        function runSearch() {
-            document.getElementById("result").innerText =
-                "Search completed successfully!";
-        }
-    </script>
 
 </body>
 
