@@ -1,16 +1,38 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from playwright.sync_api import sync_playwright
 from PIL import Image
 import pytesseract
 
-# Tell pytesseract where Tesseract is installed
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
 
-# Open image
-image = Image.open("test.png")
+def test_visual_perception():
+    test_page = Path(__file__).resolve().parents[1] / 'demo' / 'test_page.html'
 
-# OCR
-text = pytesseract.image_to_string(image)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width': 1280, 'height': 720})
 
-print("===== OCR RESULT =====")
-print(text)
+        page.goto('file://' + str(test_page))
+        page.wait_for_timeout(500)
+
+        screenshot_path = Path(__file__).resolve().parent / 'test.png'
+        page.screenshot(path=str(screenshot_path))
+
+        browser.close()
+
+    image = Image.open(screenshot_path)
+    text = pytesseract.image_to_string(image)
+
+    assert 'Privacy Browser Agent Demo' in text
+    assert 'Profile' in text
+    assert 'Search' in text
+
+    screenshot_path.unlink(missing_ok=True)
+
+
+if __name__ == '__main__':
+    test_visual_perception()
+    print('Visual perception test passed.')
