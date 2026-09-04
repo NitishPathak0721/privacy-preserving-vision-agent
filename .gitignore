@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Generated runtime screenshots
+.privacy_safe_screenshot.png
+tests/agent_safe.png
