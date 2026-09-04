@@ -1031,6 +1031,11 @@ def main():
                     task_completed = True
                     break
 
+                # Check single-action task completion.
+                if task_constraint["intent"] in {"click_only", "type_only"}:
+                    task_completed = True
+                    break
+
                 # Check sequence completion.
                 if (
                     task_constraint["intent"]
