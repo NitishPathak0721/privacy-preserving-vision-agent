@@ -4,9 +4,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.privacy.firewall import inspect_page
-from agent.privacy.sanitizer import sanitize_page
+from agent.privacy.sanitizer import sanitize_page, sanitize_page_text
 
 
+# Test PII detection and sanitization.
 def test_pii_detection_and_sanitization():
     elements = [
         {
@@ -44,10 +45,29 @@ def test_pii_detection_and_sanitization():
         },
     ]
 
-    findings = inspect_page(elements)
-    sanitized = sanitize_page(elements, findings)
+    page_text = (
+        "Name: Shivansh Srivastava\n"
+        "Email: shivansh@example.com\n"
+        "Phone: +919876543210\n"
+        "Card: 4111 1111 1111 1111"
+    )
 
-    finding_types = {finding["type"] for finding in findings}
+    findings = inspect_page(elements, page_text)
+
+    sanitized = sanitize_page(
+        elements,
+        findings,
+    )
+
+    sanitized_text = sanitize_page_text(
+        page_text,
+        findings,
+    )
+
+    finding_types = {
+        finding["type"]
+        for finding in findings
+    }
 
     assert "email" in finding_types
     assert "phone" in finding_types
@@ -61,15 +81,20 @@ def test_pii_detection_and_sanitization():
         "secret-password",
     ]
 
-    sanitized_text = str(sanitized)
+    sanitized_dom = str(sanitized)
 
     for value in raw_values:
+        assert value not in sanitized_dom
         assert value not in sanitized_text
+
+    assert "[EMAIL]" in sanitized_dom
+    assert "[PHONE]" in sanitized_dom
+    assert "[CREDIT_CARD]" in sanitized_dom
+    assert "[REDACTED]" in sanitized_dom
 
     assert "[EMAIL]" in sanitized_text
     assert "[PHONE]" in sanitized_text
     assert "[CREDIT_CARD]" in sanitized_text
-    assert "[REDACTED]" in sanitized_text
 
 
 if __name__ == "__main__":

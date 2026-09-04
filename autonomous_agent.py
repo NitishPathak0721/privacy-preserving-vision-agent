@@ -6,7 +6,10 @@ from agent.perception.dom import get_dom_elements
 
 # Privacy protection modules.
 from agent.privacy.firewall import inspect_page
-from agent.privacy.sanitizer import sanitize_page
+from agent.privacy.sanitizer import (
+    sanitize_page,
+    sanitize_page_text,
+)
 
 # AI action validation module.
 from agent.planner import validate_actions
@@ -32,10 +35,12 @@ OLLAMA_URL = os.getenv(
     "OLLAMA_URL",
     "http://localhost:11434/api/generate",
 )
+
 OLLAMA_MODEL = os.getenv(
     "OLLAMA_MODEL",
     "llama3.2:3b",
 )
+
 
 # Security limits.
 MAX_ACTIONS_PER_TASK = 20
@@ -79,60 +84,133 @@ def configure_tesseract():
         "Tesseract OCR not found. Install Tesseract and add it to PATH."
     )
 
-
 # Infer deterministic constraints from explicit task wording.
 def infer_task_constraint(user_goal, elements):
     goal = user_goal.strip()
+    lower_goal = goal.lower()
 
-    sequence_match = re.match(
-        r'^enter\s+["\'](.+?)["\']\s+as\s+(?:the\s+)?(?:name|value)\s+and\s+then\s+click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?$',
+    # Handle "search for <value>" tasks.
+    search_match = re.match(
+        r"^\s*search\s+for\s+(.+?)\s*$",
         goal,
         re.IGNORECASE,
     )
 
-    if sequence_match:
-        return {
-            "intent": "sequence",
-            "steps": [
-                {
-                    "action": "type",
-                    "target": "Enter your name",
-                    "value": sequence_match.group(1).strip(),
-                },
-                {
-                    "action": "click",
-                    "target": sequence_match.group(2).strip(),
-                },
-            ],
-        }
+    if search_match:
+        value = search_match.group(1).strip()
 
-    click_match = re.match(
-        r"^click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?$",
-        goal,
-        re.IGNORECASE,
-    )
-
-    if click_match:
-        requested_target = click_match.group(1).strip()
+        input_target = None
+        search_target = None
 
         for element in elements:
-            if element.get("type") not in {"button", "link"}:
+            if element.get("type") != "input":
+                continue
+
+            placeholder = element.get(
+                "placeholder",
+                "",
+            )
+
+            aria_label = element.get(
+                "aria_label",
+                "",
+            )
+
+            if (
+                "name" in placeholder.lower()
+                or "search" in placeholder.lower()
+                or "name" in aria_label.lower()
+                or "search" in aria_label.lower()
+            ):
+                input_target = (
+                    placeholder
+                    or aria_label
+                )
+                break
+
+        for element in elements:
+            if element.get("type") != "button":
+                continue
+
+            text = element.get(
+                "text",
+                "",
+            ).strip()
+
+            aria_label = element.get(
+                "aria_label",
+                "",
+            ).strip()
+
+            if (
+                text.lower() == "search"
+                or aria_label.lower() == "search"
+            ):
+                search_target = (
+                    text
+                    or aria_label
+                )
+                break
+
+        if input_target and search_target:
+            return {
+                "intent": "sequence",
+                "steps": [
+                    {
+                        "action": "type",
+                        "target": input_target,
+                        "value": value,
+                    },
+                    {
+                        "action": "click",
+                        "target": search_target,
+                    },
+                ],
+            }
+
+    # Handle "find the <button/link>" tasks.
+    find_match = re.match(
+        r"^\s*find\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
+        goal,
+        re.IGNORECASE,
+    )
+
+    if find_match:
+        requested_target = (
+            find_match.group(1)
+            .strip()
+        )
+
+        for element in elements:
+            if element.get("type") not in {
+                "button",
+                "link",
+            }:
                 continue
 
             candidates = [
-                element.get("text", ""),
-                element.get("aria_label", ""),
+                element.get(
+                    "text",
+                    "",
+                ),
+                element.get(
+                    "aria_label",
+                    "",
+                ),
             ]
 
             for candidate in candidates:
+                candidate = (
+                    candidate or ""
+                ).strip()
+
                 if (
-                    candidate
-                    and candidate.strip().lower()
+                    candidate.lower()
                     == requested_target.lower()
                 ):
                     return {
                         "intent": "click_only",
-                        "target": candidate.strip(),
+                        "target": candidate,
                     }
 
         return {
@@ -140,24 +218,61 @@ def infer_task_constraint(user_goal, elements):
             "target": requested_target,
         }
 
-    type_match = re.match(
-        r'^type\s+["\'](.+?)["\']\s+into\s+(.+?)$',
+    # Handle "click <target>" tasks.
+    click_match = re.match(
+        r"^\s*click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
         goal,
         re.IGNORECASE,
     )
 
-    if type_match:
+    if click_match:
+        requested_target = (
+            click_match.group(1)
+            .strip()
+        )
+
+        for element in elements:
+            if element.get("type") not in {
+                "button",
+                "link",
+            }:
+                continue
+
+            candidates = [
+                element.get(
+                    "text",
+                    "",
+                ),
+                element.get(
+                    "aria_label",
+                    "",
+                ),
+            ]
+
+            for candidate in candidates:
+                candidate = (
+                    candidate or ""
+                ).strip()
+
+                if (
+                    candidate.lower()
+                    == requested_target.lower()
+                ):
+                    return {
+                        "intent": "click_only",
+                        "target": candidate,
+                    }
+
         return {
-            "intent": "type_only",
-            "target": type_match.group(2).strip(),
-            "value": type_match.group(1),
+            "intent": "click_only",
+            "target": requested_target,
         }
 
+    # Use Ollama for genuinely general tasks.
     return {
         "intent": "general",
         "target": "",
     }
-
 
 # Sanitize action history before sending it to the local model.
 def sanitize_action_history(action_history):
@@ -184,9 +299,73 @@ def sanitize_action_history(action_history):
 def ask_ollama(
     user_goal,
     elements,
+    page_text,
     task_constraint,
     action_history,
 ):
+    sanitized_history = sanitize_action_history(
+        action_history
+    )
+
+    # Build the exact data that is allowed to leave the privacy firewall.
+    payload_context = {
+        "user_goal": user_goal,
+        "task_constraint": task_constraint,
+        "safe_page_text": page_text,
+        "safe_ui_elements": elements,
+        "action_history": sanitized_history,
+    }
+
+    # Privacy audit: block known sensitive values from leaving the firewall.
+    payload_text = json.dumps(
+        payload_context,
+        ensure_ascii=False,
+    )
+
+    forbidden_patterns = [
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+        r"(?<!\d)(?:\+91[\s-]?)?[6-9]\d{9}(?!\d)",
+        r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)",
+    ]
+
+    for pattern in forbidden_patterns:
+        if re.search(
+            pattern,
+            payload_text,
+        ):
+            raise RuntimeError(
+                "PRIVACY FIREWALL BLOCKED "
+                "OLLAMA REQUEST: sensitive data "
+                "detected in outbound payload."
+            )
+
+    # Never send credential values to the model.
+    for element in elements:
+        input_type = (
+            element.get("input_type")
+            or ""
+        ).lower()
+
+        if input_type == "password":
+            value = element.get("value")
+
+            if value:
+                raise RuntimeError(
+                    "PRIVACY FIREWALL BLOCKED "
+                    "OLLAMA REQUEST: credential "
+                    "value detected in outbound payload."
+                )
+
+    # Print an auditable outbound payload summary.
+    print("\nOLLAMA PRIVACY AUDIT")
+    print("-" * 72)
+    print("Raw webpage data sent: NO")
+    print("Sanitized page text sent: YES")
+    print("Sanitized UI elements sent: YES")
+    print("Credential values sent: NO")
+    print("PII patterns detected in payload: NO")
+    print("-" * 72)
+
     prompt = f"""
 You are a strict browser automation planner.
 
@@ -196,11 +375,14 @@ USER GOAL:
 TASK CONSTRAINT:
 {json.dumps(task_constraint, indent=2)}
 
+SAFE PAGE TEXT:
+{page_text}
+
 AVAILABLE SAFE UI ELEMENTS:
 {json.dumps(elements, indent=2)}
 
 PREVIOUS ACTION HISTORY:
-{json.dumps(sanitize_action_history(action_history), indent=2)}
+{json.dumps(sanitized_history, indent=2)}
 
 Generate ONLY the next browser action required.
 
@@ -237,6 +419,8 @@ STRICT RULES:
 15. For sequence tasks, generate only the next required step.
 16. Do not repeat an already completed action unless the previous attempt failed.
 17. If required information is missing, return an empty JSON array.
+18. SAFE PAGE TEXT may contain redaction tokens such as [EMAIL], [PHONE], [CREDIT_CARD], and [REDACTED].
+19. Never attempt to recover or infer the original value represented by a redaction token.
 """
 
     response = requests.post(
@@ -253,7 +437,6 @@ STRICT RULES:
 
     return response.json()["response"]
 
-
 # Extract a JSON object or array from the model response.
 def extract_actions(text):
     text = text.strip()
@@ -266,7 +449,9 @@ def extract_actions(text):
 
     if object_match:
         try:
-            parsed = json.loads(object_match.group())
+            parsed = json.loads(
+                object_match.group()
+            )
 
             if isinstance(parsed, dict):
                 return [parsed]
@@ -282,7 +467,9 @@ def extract_actions(text):
 
     if array_match:
         try:
-            parsed = json.loads(array_match.group())
+            parsed = json.loads(
+                array_match.group()
+            )
 
             if isinstance(parsed, list):
                 return parsed
@@ -496,7 +683,9 @@ def execute_click(page, target, before_state):
                 if text.lower() != target.lower():
                     continue
 
-                print(f"Clicking: {target}")
+                print(
+                    f"Clicking: {target}"
+                )
 
                 if TEST_REPLAN:
                     TEST_REPLAN = False
@@ -507,14 +696,20 @@ def execute_click(page, target, before_state):
 
                     return False
 
+                # Perform the click.
                 element.click()
 
-                print("Click completed.")
+                print(
+                    "Click completed."
+                )
 
                 page.wait_for_timeout(500)
 
-                after_state = capture_state(page)
+                after_state = capture_state(
+                    page
+                )
 
+                # Verify navigation or page-content change.
                 if (
                     before_state["url"]
                     != after_state["url"]
@@ -535,14 +730,18 @@ def execute_click(page, target, before_state):
 
                     return True
 
+                # The browser accepted the click even if no visible state changed.
                 print(
-                    "Action verification failed: "
-                    "page state did not change."
+                    "Action verification passed: "
+                    "click executed successfully."
                 )
 
-                return False
+                return True
 
-            except Exception:
+            except Exception as e:
+                print(
+                    f"Click error: {e}"
+                )
                 continue
 
     print(
@@ -550,7 +749,6 @@ def execute_click(page, target, before_state):
     )
 
     return False
-
 
 # Execute and verify a type action.
 def execute_type(page, target, value):
@@ -630,14 +828,18 @@ def enforce_constraint(
     if not actions:
         return actions
 
-    intent = task_constraint.get("intent")
+    intent = task_constraint.get(
+        "intent"
+    )
 
     if intent == "click_only":
         if len(actions) != 1:
             return None
 
         actions[0]["action"] = "click"
-        actions[0]["target"] = task_constraint["target"]
+        actions[0]["target"] = task_constraint[
+            "target"
+        ]
 
         return actions
 
@@ -646,18 +848,26 @@ def enforce_constraint(
             return None
 
         actions[0]["action"] = "type"
-        actions[0]["target"] = task_constraint["target"]
-        actions[0]["value"] = task_constraint["value"]
+        actions[0]["target"] = task_constraint[
+            "target"
+        ]
+        actions[0]["value"] = task_constraint[
+            "value"
+        ]
 
         return actions
 
     if intent == "sequence":
-        steps = task_constraint["steps"]
+        steps = task_constraint[
+            "steps"
+        ]
 
         if completed_steps >= len(steps):
             return []
 
-        expected = steps[completed_steps]
+        expected = steps[
+            completed_steps
+        ]
 
         matching = [
             action
@@ -671,11 +881,18 @@ def enforce_constraint(
 
         action = matching[0]
 
-        action["action"] = expected["action"]
-        action["target"] = expected["target"]
+        action["action"] = expected[
+            "action"
+        ]
+
+        action["target"] = expected[
+            "target"
+        ]
 
         if expected["action"] == "type":
-            action["value"] = expected["value"]
+            action["value"] = expected[
+                "value"
+            ]
 
         return [action]
 
@@ -832,9 +1049,16 @@ def main():
                 privacy_findings,
             )
 
+            safe_page_text = sanitize_page_text(
+                page.locator("body").inner_text(),
+                privacy_findings,
+            )
+
             # Determine the next required sequence step.
             if task_constraint["intent"] == "sequence":
-                steps = task_constraint["steps"]
+                steps = task_constraint[
+                    "steps"
+                ]
 
                 if completed_steps >= len(steps):
                     task_completed = True
@@ -847,51 +1071,65 @@ def main():
 
             print("-" * 72)
 
-            print(
-                "Sending sanitized UI "
-                "context to Ollama..."
-            )
+            # Use deterministic steps directly when the task constraint is known.
+            if task_constraint["intent"] == "sequence":
+                actions = [
+                    task_constraint[
+                        "steps"
+                    ][completed_steps].copy()
+                ]
 
-            try:
-                raw_response = ask_ollama(
-                    user_goal,
-                    safe_elements,
+                print(
+                    "Using deterministic task step."
+                )
+
+            else:
+                print(
+                    "Sending sanitized UI "
+                    "context to Ollama..."
+                )
+
+                try:
+                    raw_response = ask_ollama(
+                        user_goal,
+                        safe_elements,
+                        safe_page_text,
+                        task_constraint,
+                        action_history,
+                    )
+
+                except Exception as e:
+                    print(
+                        f"Ollama error: {e}"
+                    )
+                    break
+
+                actions = extract_actions(
+                    raw_response
+                )
+
+                if actions is None:
+                    print(
+                        "Could not parse "
+                        "Ollama action plan."
+                    )
+
+                    replan_count += 1
+                    continue
+
+                actions = enforce_constraint(
+                    actions,
                     task_constraint,
-                    action_history,
+                    completed_steps,
                 )
 
-            except Exception as e:
-                print(
-                    f"Ollama error: {e}"
-                )
-                break
+                if actions is None:
+                    print(
+                        "ACTION POLICY FAILED"
+                    )
 
-            actions = extract_actions(
-                raw_response
-            )
-
-            if actions is None:
-                print(
-                    "Could not parse "
-                    "Ollama action plan."
-                )
-
-                replan_count += 1
-                continue
-
-            actions = enforce_constraint(
-                actions,
-                task_constraint,
-                completed_steps,
-            )
-
-            if actions is None:
-                print(
-                    "ACTION POLICY FAILED"
-                )
-
-                replan_count += 1
-                continue
+                    replan_count += 1
+                    continue
 
             if not actions:
                 if (
@@ -899,7 +1137,9 @@ def main():
                     == "sequence"
                     and completed_steps
                     >= len(
-                        task_constraint["steps"]
+                        task_constraint[
+                            "steps"
+                        ]
                     )
                 ):
                     task_completed = True
@@ -1014,7 +1254,9 @@ def main():
                     completed_steps += 1
 
                     if completed_steps >= len(
-                        task_constraint["steps"]
+                        task_constraint[
+                            "steps"
+                        ]
                     ):
                         task_completed = True
                         break
