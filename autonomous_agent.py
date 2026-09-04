@@ -665,7 +665,6 @@ def print_ocr_text(
         "-" * 72
     )
 
-
 # Display sensitive information detected by the privacy firewall.
 def print_privacy_findings(
     findings,
@@ -703,22 +702,22 @@ def print_privacy_findings(
             "unknown",
         )
 
-        value = finding.get(
-            "value"
+        element = finding.get(
+            "element"
         )
 
-        if value:
-            display_value = value
-
-        else:
-            display_value = (
-                "[SENSITIVE ELEMENT]"
+        if element is not None:
+            element_type = element.get(
+                "type",
+                "unknown",
             )
+        else:
+            element_type = "page_text"
 
         print(
             f"{index}. "
             f"{finding_type.upper():<15} "
-            f"{display_value}"
+            f"source={element_type}"
         )
 
     print(
