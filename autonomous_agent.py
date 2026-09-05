@@ -107,7 +107,8 @@ def infer_task_constraint(
     user_goal,
     elements,
 ):
-    goal = user_goal.strip()
+    # Normalize the user goal.
+    goal = (user_goal or "").strip()
 
     # Detect an explicit ordered sequence before handling single-action tasks.
     sequence_pattern = re.compile(
@@ -222,6 +223,7 @@ def infer_task_constraint(
             ],
         }
 
+    # Detect an explicit click-only request.
     click_match = re.match(
         r"^\s*click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
         goal,
@@ -269,6 +271,7 @@ def infer_task_constraint(
             "target": requested_target,
         }
 
+    # Detect an explicit type-only request.
     type_match = re.match(
         r'^\s*type\s+["\'](.+?)["\']\s+into\s+(.+?)\s*$',
         goal,
@@ -330,6 +333,59 @@ def infer_task_constraint(
             "value": value,
         }
 
+    # Detect requests that require information from the user.
+    missing_information_patterns = [
+        (
+            r"\bmy\s+name\b",
+            "your name",
+        ),
+        (
+            r"\bmy\s+email\b",
+            "your email",
+        ),
+        (
+            r"\bmy\s+phone\b",
+            "your phone number",
+        ),
+        (
+            r"\bmy\s+number\b",
+            "your number",
+        ),
+        (
+            r"\bmy\s+address\b",
+            "your address",
+        ),
+        (
+            r"\bmy\s+username\b",
+            "your username",
+        ),
+        (
+            r"\bmy\s+password\b",
+            "your password",
+        ),
+        (
+            r"\bmy\s+date\s+of\s+birth\b",
+            "your date of birth",
+        ),
+        (
+            r"\bmy\s+dob\b",
+            "your date of birth",
+        ),
+    ]
+
+    for pattern, description in missing_information_patterns:
+        if re.search(
+            pattern,
+            goal,
+            re.IGNORECASE,
+        ):
+            return {
+                "intent": "requires_user_input",
+                "target": "",
+                "missing_information": description,
+            }
+
+    # Fall back to a general task.
     return {
         "intent": "general",
         "target": "",
@@ -1414,6 +1470,31 @@ def main():
             f"Task constraint: "
             f"{task_constraint}"
         )
+
+        # Stop safely when the task requires information that was not provided.
+        if task_constraint.get(
+            "intent"
+        ) == "requires_user_input":
+            missing_information = task_constraint.get(
+                "missing_information",
+                "required information",
+            )
+
+            print(
+                "\nUSER INPUT REQUIRED"
+            )
+
+            print(
+                f"The task requires {missing_information}."
+            )
+
+            print(
+                "No browser action was executed."
+            )
+
+            browser.close()
+
+            return
 
         # Closed-loop planning and execution.
         while True:
