@@ -1652,10 +1652,11 @@ def main():
                 else:
                     print(
                         "\nPlanner returned no action. "
-                        "Task complete or unable to continue."
+                        "Task could not be completed."
                     )
 
-                    task_completed = True
+                    all_success = False
+                    task_completed = False
 
                     break
 
