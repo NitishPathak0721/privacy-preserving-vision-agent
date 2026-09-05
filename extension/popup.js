@@ -304,7 +304,6 @@ function elementMatchesSemanticTarget(
 
         return fields.some(
             (field) =>
-                field === "name" ||
                 field.includes("name")
         );
     }
@@ -405,93 +404,14 @@ function canonicalizeActionTarget(
             .trim()
             .toLowerCase();
 
-    const allElements =
-        Array.isArray(
-            browserContext.elements
-        )
-            ? browserContext.elements
-            : [];
-
     const elements =
-        allElements.filter(
+        browserContext.elements.filter(
             (element) =>
                 isElementSuitableForAction(
                     element,
                     actionType
                 )
         );
-
-    // Prefer deterministic field identifiers for common type targets.
-    if (
-        actionType === "type" &&
-        [
-            "name field",
-            "name input",
-            "name textbox",
-            "name text field",
-            "enter name",
-            "enter your name"
-        ].includes(
-            normalizeTargetText(target)
-        )
-    ) {
-        const nameMatches =
-            elements.filter(
-                (element) => {
-                    const id =
-                        normalizeTargetText(
-                            element.id
-                        );
-
-                    const name =
-                        normalizeTargetText(
-                            element.name
-                        );
-
-                    const placeholder =
-                        normalizeTargetText(
-                            element.placeholder
-                        );
-
-                    const ariaLabel =
-                        normalizeTargetText(
-                            element.aria_label
-                        );
-
-                    return (
-                        id === "name" ||
-                        name === "name" ||
-                        placeholder === "enter your name" ||
-                        ariaLabel === "name"
-                    );
-                }
-            );
-
-        if (nameMatches.length === 1) {
-            const element =
-                nameMatches[0];
-
-            const canonicalTarget =
-                [
-                    element.placeholder,
-                    element.aria_label,
-                    element.name,
-                    element.id
-                ].find(
-                    (value) =>
-                        typeof value === "string" &&
-                        value.trim()
-                );
-
-            if (canonicalTarget) {
-                return {
-                    ...action,
-                    target:
-                        canonicalTarget.trim()
-                };
-            }
-        }
-    }
 
     // Prefer exact target matches.
     const exactMatches =
@@ -594,57 +514,58 @@ async function executeBrowserAction(
     return response;
 }
 
-// Sanitize PII before displaying results.
-function sanitizeDisplayedText(
-    value
-) {
+// Redact common PII before displaying results.
+function redactDisplayText(value) {
     if (
         typeof value !== "string"
     ) {
         return value;
     }
 
-    return value
-        .replace(
-            /\b[A-Z]{5}\d{4}[A-Z]\b/gi,
-            "[PAN]"
-        )
-        .replace(
-            /\b\d{4}\s?\d{4}\s?\d{4}\b/g,
-            "[AADHAAR]"
-        )
-        .replace(
-            /\b(?:\d[ -]?){13,19}\b/g,
-            "[CREDIT_CARD]"
-        )
-        .replace(
-            /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-            "[EMAIL]"
-        )
-        .replace(
-            /(?:\+91[\s-]?)?[6-9]\d{9}\b/g,
-            "[PHONE]"
-        );
+    let text = value;
+
+    text = text.replace(
+        /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+        "[EMAIL]"
+    );
+
+    text = text.replace(
+        /(?<!\d)(?:\+91[\s-]?)?[6-9]\d{9}(?!\d)/g,
+        "[PHONE]"
+    );
+
+    text = text.replace(
+        /(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g,
+        "[CREDIT_CARD]"
+    );
+
+    text = text.replace(
+        /(?<!\d)\d{4}[\s-]\d{4}[\s-]\d{4}(?!\d)/g,
+        "[AADHAAR]"
+    );
+
+    text = text.replace(
+        /(?<![A-Z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Z0-9])/gi,
+        "[PAN]"
+    );
+
+    return text;
 }
 
-// Recursively sanitize values before displaying them.
-function sanitizeDisplayedValue(
-    value
-) {
+// Redact PII recursively in popup output.
+function sanitizeDisplayValue(value) {
     if (
         typeof value === "string"
     ) {
-        return sanitizeDisplayedText(
+        return redactDisplayText(
             value
         );
     }
 
-    if (
-        Array.isArray(value)
-    ) {
+    if (Array.isArray(value)) {
         return value.map(
             (item) =>
-                sanitizeDisplayedValue(
+                sanitizeDisplayValue(
                     item
                 )
         );
@@ -657,27 +578,13 @@ function sanitizeDisplayedValue(
         const sanitized = {};
 
         for (
-            const [
-                key,
-                item
-            ] of Object.entries(value)
+            const [key, item]
+            of Object.entries(value)
         ) {
-            if (
-                key === "value" &&
-                typeof item === "string"
-            ) {
-                sanitized[key] =
-                    item.includes("[REDACTED]")
-                        ? "[REDACTED]"
-                        : sanitizeDisplayedText(
-                            item
-                        );
-            } else {
-                sanitized[key] =
-                    sanitizeDisplayedValue(
-                        item
-                    );
-            }
+            sanitized[key] =
+                sanitizeDisplayValue(
+                    item
+                );
         }
 
         return sanitized;
@@ -686,100 +593,375 @@ function sanitizeDisplayedValue(
     return value;
 }
 
-// Display the final result safely.
-function showResult(
-    result
-) {
-    const safeResult =
-        sanitizeDisplayedValue(
+// Convert technical agent results into simple user-friendly messages.
+function getSimpleProblemMessage(result) {
+    if (!result) {
+        return "";
+    }
+
+    const status =
+        String(result.status || "")
+            .trim()
+            .toLowerCase();
+
+    const reason =
+        String(result.reason || "")
+            .trim()
+            .toLowerCase();
+
+    if (
+        status === "completed" ||
+        status === "done"
+    ) {
+        return "Task completed successfully.";
+    }
+
+    if (
+        status === "blocked"
+    ) {
+        if (
+            reason.includes("credential") ||
+            reason.includes("password") ||
+            reason.includes("login")
+        ) {
+            return "Problem: This task needs protected login information, so it was blocked for your safety.";
+        }
+
+        if (
+            reason.includes("information that only the user can provide")
+        ) {
+            return "Problem: Some information needed for this task was not provided.";
+        }
+
+        if (result.reason) {
+            return `Problem: ${result.reason}`;
+        }
+
+        return "Problem: This action was blocked for your safety.";
+    }
+
+    if (
+        status === "no_actions"
+    ) {
+        return "Problem: The agent could not find a safe action to perform.";
+    }
+
+    if (
+        status === "agent_not_ready"
+    ) {
+        return "Problem: The AI could not create a safe action plan.";
+    }
+
+    if (
+        status === "execution_failed"
+    ) {
+        return "Problem: The browser could not safely complete the requested action.";
+    }
+
+    if (
+        status === "max_cycles_reached"
+    ) {
+        return "Problem: The agent could not complete the task within the allowed steps.";
+    }
+
+    if (
+        result.error
+    ) {
+        return `Problem: ${result.error}`;
+    }
+
+    return "";
+}
+
+// Display a privacy-safe formatted result.
+function showResult(result) {
+    const sanitizedResult =
+        sanitizeDisplayValue(
             result
         );
 
     output.textContent =
         JSON.stringify(
-            safeResult,
+            sanitizedResult,
             null,
             2
         );
-}
 
-// Update agent status.
-function setStatus(
-    status,
-    type = "idle"
-) {
-    const statusText =
+    const existingProblem =
         document.getElementById(
-            "status-text"
+            "resultProblem"
         );
 
-    const statusDot =
-        document.getElementById(
-            "status-dot"
+    if (existingProblem) {
+        existingProblem.remove();
+    }
+
+    const message =
+        getSimpleProblemMessage(
+            result
         );
 
-    if (statusText) {
-        statusText.textContent =
-            status;
+    if (!message) {
+        return;
     }
 
-    if (statusDot) {
-        statusDot.className =
-            `status-dot ${type}`;
-    }
+    const problemBox =
+        document.createElement("div");
+
+    problemBox.id =
+        "resultProblem";
+
+    problemBox.style.marginTop =
+        "16px";
+
+    problemBox.style.marginBottom =
+        "12px";
+
+    problemBox.style.padding =
+        "14px 16px";
+
+    problemBox.style.border =
+        "1px solid #e4e7ec";
+
+    problemBox.style.borderRadius =
+        "10px";
+
+    problemBox.style.background =
+        "#f8fafc";
+
+    const title =
+        document.createElement("div");
+
+    title.textContent =
+        "What happened?";
+
+    title.style.fontSize =
+        "13px";
+
+    title.style.fontWeight =
+        "700";
+
+    title.style.marginBottom =
+        "5px";
+
+    const text =
+        document.createElement("div");
+
+    text.textContent =
+        message;
+
+    text.style.fontSize =
+        "12px";
+
+    text.style.color =
+        "#475467";
+
+    text.style.lineHeight =
+        "1.5";
+
+    problemBox.appendChild(
+        title
+    );
+
+    problemBox.appendChild(
+        text
+    );
+
+    output.parentNode.insertBefore(
+        problemBox,
+        output
+    );
 }
 
-// Run the autonomous observe-plan-act loop.
-async function runAgentLoop(
-    task
+// Normalize text for task comparisons.
+function normalizeTaskText(value) {
+    if (
+        typeof value !== "string"
+    ) {
+        return "";
+    }
+
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+}
+
+// Check whether the task explicitly ends with a click action.
+function isFinalClickAction(
+    task,
+    action
 ) {
+    if (
+        !action ||
+        typeof action !== "object"
+    ) {
+        return false;
+    }
+
+    if (
+        String(action.action || "")
+            .trim()
+            .toLowerCase() !== "click"
+    ) {
+        return false;
+    }
+
+    const normalizedTask =
+        normalizeTaskText(task);
+
+    if (!normalizedTask) {
+        return false;
+    }
+
+    const match =
+        normalizedTask.match(
+            /(?:^|\s)(?:and\s+|then\s+)?click\s+(?:the\s+)?(.+?)\s*$/
+        );
+
+    if (!match) {
+        return false;
+    }
+
+    let requestedTarget =
+        match[1].trim();
+
+    requestedTarget =
+        requestedTarget.replace(
+            /\s+(?:button|link)$/,
+            ""
+        ).trim();
+
+    const actionTarget =
+        normalizeTaskText(
+            action.target
+        );
+
+    requestedTarget =
+        normalizeTaskText(
+            requestedTarget
+        );
+
+    if (
+        !requestedTarget ||
+        !actionTarget
+    ) {
+        return false;
+    }
+
+    return (
+        requestedTarget === actionTarget ||
+        requestedTarget.includes(actionTarget) ||
+        actionTarget.includes(requestedTarget)
+    );
+}
+
+// Check whether the page explicitly reports success.
+function pageShowsSuccess(
+    browserContext
+) {
+    if (
+        !browserContext ||
+        typeof browserContext.page_text !==
+            "string"
+    ) {
+        return false;
+    }
+
+    const pageText =
+        browserContext.page_text
+            .toLowerCase();
+
+    const successIndicators = [
+        "successfully",
+        "success",
+        "completed successfully",
+        "operation completed",
+        "search completed",
+        "task completed"
+    ];
+
+    return successIndicators.some(
+        (indicator) =>
+            pageText.includes(indicator)
+    );
+}
+
+// Ask the local agent to plan the next step.
+async function getAgentPlan(
+    task,
+    browserContext
+) {
+    return await callBridge(
+        "/agent",
+        {
+            task: task,
+            url:
+                browserContext.url,
+            title:
+                browserContext.title,
+            elements:
+                browserContext.elements,
+            page_text:
+                browserContext.page_text || ""
+        }
+    );
+}
+
+// Execute the autonomous observe-plan-act loop.
+async function runAgentLoop(task) {
+    const cycles = [];
+
     let browserContext =
         await getBrowserContext();
-
-    const cycles = [];
 
     for (
         let cycle = 1;
         cycle <= MAX_CYCLES;
         cycle++
     ) {
-        setStatus(
-            `Cycle ${cycle}: inspecting browser`,
-            "running"
-        );
-
-        browserContext =
-            await getBrowserContext();
+        output.textContent =
+            `Cycle ${cycle}: planning...`;
 
         const agentResult =
-            await callBridge(
-                "/agent",
-                {
-                    task: task,
-                    url: browserContext.url,
-                    title: browserContext.title,
-                    elements: browserContext.elements,
-                    page_text: browserContext.page_text || ""
-                }
+            await getAgentPlan(
+                task,
+                browserContext
             );
 
+        if (!agentResult.success) {
+            return {
+                success: false,
+                cycles: cycles,
+                error:
+                    agentResult.error ||
+                    "Agent planning failed."
+            };
+        }
+
+        const agent =
+            agentResult.agent;
+
         const plan =
-            agentResult?.agent?.response ||
-            agentResult?.plan ||
-            agentResult?.response ||
-            agentResult;
+            agent?.response;
+
+        if (!plan) {
+            return {
+                success: false,
+                cycles: cycles,
+                error:
+                    "Agent returned no plan."
+            };
+        }
 
         const cycleRecord = {
             cycle: cycle,
             privacy:
-                plan.privacy || {},
+                agentResult.privacy,
             agent: {
                 model:
-                    plan.model ||
-                    "qwen2.5vl:3b",
+                    agent.model,
                 response:
-                    plan.plan ||
-                    plan.response ||
                     plan
             },
             actions: []
@@ -790,59 +972,9 @@ async function runAgentLoop(
         );
 
         if (
-            plan.status ===
-            "requires_user_input"
+            plan.status === "completed" ||
+            plan.status === "done"
         ) {
-            setStatus(
-                `User input required: ${
-                    plan.missing_information ||
-                    "required information"
-                }`,
-                "warning"
-            );
-
-            return {
-                success: false,
-                status:
-                    "requires_user_input",
-                reason:
-                    plan.reason ||
-                    "The task requires information that only the user can provide.",
-                missing_information:
-                    plan.missing_information ||
-                    "",
-                cycles: cycles
-            };
-        }
-
-        if (
-            plan.status ===
-            "blocked"
-        ) {
-            setStatus(
-                "Action blocked by security policy",
-                "error"
-            );
-
-            return {
-                success: false,
-                status: "blocked",
-                reason:
-                    plan.reason ||
-                    "The action was blocked.",
-                cycles: cycles
-            };
-        }
-
-        if (
-            plan.status ===
-            "completed"
-        ) {
-            setStatus(
-                "Task completed",
-                "success"
-            );
-
             return {
                 success: true,
                 status: "completed",
@@ -856,15 +988,15 @@ async function runAgentLoop(
         if (
             plan.status !== "ready"
         ) {
-            setStatus(
-                "Agent not ready",
-                "error"
-            );
-
             return {
                 success: false,
                 status:
-                    "agent_not_ready",
+                    plan.status === "blocked"
+                        ? "blocked"
+                        : "agent_not_ready",
+                reason:
+                    plan.reason ||
+                    "The agent could not safely continue.",
                 cycles: cycles
             };
         }
@@ -877,15 +1009,13 @@ async function runAgentLoop(
         if (
             actions.length === 0
         ) {
-            setStatus(
-                "No executable action",
-                "error"
-            );
-
             return {
                 success: false,
                 status:
                     "no_actions",
+                reason:
+                    plan.reason ||
+                    "The agent could not find a safe action to perform.",
                 cycles: cycles
             };
         }
@@ -924,14 +1054,11 @@ async function runAgentLoop(
                         policy.reason
                 };
 
-                setStatus(
-                    "Action blocked",
-                    "error"
-                );
-
                 return {
                     success: false,
                     status: "blocked",
+                    reason:
+                        policy.reason,
                     cycles: cycles,
                     security: {
                         status: "blocked",
@@ -941,10 +1068,8 @@ async function runAgentLoop(
                 };
             }
 
-            setStatus(
-                `Cycle ${cycle}: executing ${action.action} on ${action.target}`,
-                "running"
-            );
+            output.textContent =
+                `Cycle ${cycle}: executing ${action.action} on ${action.target}...`;
 
             try {
                 const result =
@@ -956,15 +1081,13 @@ async function runAgentLoop(
                     result;
 
                 if (!result.success) {
-                    setStatus(
-                        "Action failed",
-                        "error"
-                    );
-
                     return {
                         success: false,
                         status:
                             "execution_failed",
+                        reason:
+                            result.error ||
+                            "The browser could not safely complete the action.",
                         cycles: cycles
                     };
                 }
@@ -984,220 +1107,18 @@ async function runAgentLoop(
                         await getBrowserContext();
                 }
 
-                const verification =
-                    result.verification;
+                const isLastAction =
+                    actionIndex ===
+                    actions.length - 1;
 
+                // Complete the task when the final requested click succeeds.
                 if (
-                    verification &&
-                    verification.success === false
+                    isLastAction &&
+                    isFinalClickAction(
+                        task,
+                        action
+                    )
                 ) {
-                    setStatus(
-                        "Action verification failed",
-                        "error"
-                    );
-
-                    return {
-                        success: false,
-                        status:
-                            "verification_failed",
-                        cycles: cycles
-                    };
-                }
-
-                if (
-                    verification &&
-                    verification.success === true
-                ) {
-                    actionRecord.result =
-                        result;
-                }
-
-                const refreshedContext =
-                    await getBrowserContext();
-
-                browserContext =
-                    refreshedContext;
-
-                // Continue explicit type-then-click tasks after successful typing.
-                const sequenceMatch =
-                    task.match(
-                        /^type\s+(.+?)\s+into\s+(.+?)\s+and\s+then\s+click\s+(.+)$/i
-                    );
-
-                if (
-                    sequenceMatch &&
-                    action.action === "type"
-                ) {
-                    const clickTarget =
-                        sequenceMatch[3].trim();
-
-                    const clickAction = {
-                        action: "click",
-                        target: clickTarget
-                    };
-
-                    const canonicalClickAction =
-                        canonicalizeActionTarget(
-                            clickAction,
-                            browserContext
-                        );
-
-                    const clickPolicy =
-                        validateAction(
-                            canonicalClickAction
-                        );
-
-                    const clickRecord = {
-                        action:
-                            canonicalClickAction,
-                        policy:
-                            clickPolicy
-                    };
-
-                    cycleRecord.actions.push(
-                        clickRecord
-                    );
-
-                    if (!clickPolicy.allowed) {
-                        clickRecord.result = {
-                            success: false,
-                            error:
-                                clickPolicy.reason
-                        };
-
-                        setStatus(
-                            "Action blocked",
-                            "error"
-                        );
-
-                        return {
-                            success: false,
-                            status: "blocked",
-                            cycles: cycles
-                        };
-                    }
-
-                    setStatus(
-                        `Cycle ${cycle}: executing click on ${canonicalClickAction.target}`,
-                        "running"
-                    );
-
-                    const clickResult =
-                        await executeBrowserAction(
-                            canonicalClickAction
-                        );
-
-                    clickRecord.result =
-                        clickResult;
-
-                    if (!clickResult.success) {
-                        setStatus(
-                            "Action failed",
-                            "error"
-                        );
-
-                        return {
-                            success: false,
-                            status:
-                                "execution_failed",
-                            cycles: cycles
-                        };
-                    }
-
-                    const clickPostActionContext =
-                        getPostActionContext(
-                            clickResult
-                        );
-
-                    if (
-                        clickPostActionContext
-                    ) {
-                        browserContext =
-                            clickPostActionContext;
-                    } else {
-                        browserContext =
-                            await getBrowserContext();
-                    }
-
-                    const clickVerification =
-                        clickResult.verification;
-
-                    if (
-                        clickVerification &&
-                        clickVerification.success === false
-                    ) {
-                        setStatus(
-                            "Action verification failed",
-                            "error"
-                        );
-
-                        return {
-                            success: false,
-                            status:
-                                "verification_failed",
-                            cycles: cycles
-                        };
-                    }
-
-                    const finalContext =
-                        await getBrowserContext();
-
-                    browserContext =
-                        finalContext;
-
-                    if (
-                        finalContext.page_text
-                            .toLowerCase()
-                            .includes(
-                                "search completed successfully"
-                            )
-                    ) {
-                        setStatus(
-                            "Task completed",
-                            "success"
-                        );
-
-                        return {
-                            success: true,
-                            status: "completed",
-                            reason:
-                                "The requested type-and-click sequence completed successfully.",
-                            cycles: cycles
-                        };
-                    }
-
-                    if (
-                        clickVerification &&
-                        clickVerification.success === true
-                    ) {
-                        setStatus(
-                            "Task completed",
-                            "success"
-                        );
-
-                        return {
-                            success: true,
-                            status: "completed",
-                            reason:
-                                "The requested type-and-click sequence was executed successfully.",
-                            cycles: cycles
-                        };
-                    }
-                }
-
-                if (
-                    action.action === "click" &&
-                    refreshedContext.page_text
-                        .toLowerCase()
-                        .includes(
-                            "completed successfully"
-                        )
-                ) {
-                    setStatus(
-                        "Task completed",
-                        "success"
-                    );
-
                     return {
                         success: true,
                         status: "completed",
@@ -1207,18 +1128,12 @@ async function runAgentLoop(
                     };
                 }
 
+                // Complete when the page explicitly reports success.
                 if (
-                    refreshedContext.page_text
-                        .toLowerCase()
-                        .includes(
-                            "search completed successfully"
-                        )
+                    pageShowsSuccess(
+                        browserContext
+                    )
                 ) {
-                    setStatus(
-                        "Task completed",
-                        "success"
-                    );
-
                     return {
                         success: true,
                         status: "completed",
@@ -1234,24 +1149,19 @@ async function runAgentLoop(
                         error.message
                 };
 
-                setStatus(
-                    "Action failed",
-                    "error"
-                );
-
                 return {
                     success: false,
                     status:
                         "execution_failed",
+                    reason:
+                        error.message,
                     cycles: cycles
                 };
             }
         }
 
-        setStatus(
-            `Cycle ${cycle}: state updated`,
-            "running"
-        );
+        output.textContent =
+            `Cycle ${cycle}: state updated.`;
 
         await new Promise(
             (resolve) =>
@@ -1262,15 +1172,12 @@ async function runAgentLoop(
         );
     }
 
-    setStatus(
-        "Maximum cycles reached",
-        "error"
-    );
-
     return {
         success: false,
         status:
             "max_cycles_reached",
+        reason:
+            "The agent could not complete the task within the allowed steps.",
         cycles: cycles
     };
 }
@@ -1285,24 +1192,13 @@ inspectButton.addEventListener(
         if (!task) {
             showResult({
                 success: false,
+                status: "invalid_task",
                 error:
                     "Please enter a browser task."
             });
 
-            setStatus(
-                "Enter a browser task",
-                "warning"
-            );
-
             return;
         }
-
-        inspectButton.disabled = true;
-
-        setStatus(
-            "Starting autonomous agent...",
-            "running"
-        );
 
         output.textContent =
             "Starting autonomous agent...";
@@ -1315,20 +1211,12 @@ inspectButton.addEventListener(
 
             showResult(result);
         } catch (error) {
-            setStatus(
-                "Action failed",
-                "error"
-            );
-
             showResult({
                 success: false,
-                status:
-                    "execution_failed",
+                status: "error",
                 error:
                     error.message
             });
-        } finally {
-            inspectButton.disabled = false;
         }
     }
 );

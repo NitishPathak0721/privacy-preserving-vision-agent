@@ -1,5 +1,3 @@
-# Privacy-preserving local browser-agent bridge.
-
 import json
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -13,61 +11,41 @@ from agent.privacy.sanitizer import (
 )
 
 
-# Bridge configuration.
 HOST = "127.0.0.1"
 PORT = 8765
-
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5vl:3b"
 
-MAX_PAGE_TEXT_LENGTH = 12000
 
-ALLOWED_BROWSER_HOSTS = {
-    "localhost",
-    "127.0.0.1",
-}
-
-
-# Return a JSON HTTP response.
-def json_response(
-    handler,
-    status_code,
-    payload,
-):
+# Send a JSON HTTP response.
+def send_json_response(handler, status_code, payload):
     body = json.dumps(
         payload,
         ensure_ascii=False,
     ).encode("utf-8")
 
     handler.send_response(status_code)
-
     handler.send_header(
         "Content-Type",
         "application/json; charset=utf-8",
     )
-
-    handler.send_header(
-        "Content-Length",
-        str(len(body)),
-    )
-
     handler.send_header(
         "Access-Control-Allow-Origin",
         "*",
     )
-
     handler.send_header(
         "Access-Control-Allow-Headers",
         "Content-Type",
     )
-
     handler.send_header(
         "Access-Control-Allow-Methods",
         "GET, POST, OPTIONS",
     )
-
+    handler.send_header(
+        "Content-Length",
+        str(len(body)),
+    )
     handler.end_headers()
-
     handler.wfile.write(body)
 
 
@@ -79,9 +57,6 @@ def read_json_body(handler):
             "0",
         )
     )
-
-    if content_length <= 0:
-        return {}
 
     raw_body = handler.rfile.read(
         content_length
@@ -105,7 +80,9 @@ def check_ollama():
             timeout=5,
         ) as response:
             data = json.loads(
-                response.read().decode("utf-8")
+                response.read().decode(
+                    "utf-8"
+                )
             )
 
         models = data.get(
@@ -113,10 +90,11 @@ def check_ollama():
             [],
         )
 
-        return any(
-            model.get("name") == OLLAMA_MODEL
-            for model in models
-        )
+        for model in models:
+            if model.get("name") == OLLAMA_MODEL:
+                return True
+
+        return False
 
     except Exception:
         return False
@@ -135,6 +113,60 @@ def normalize_context(payload):
     ):
         elements = []
 
+    normalized_elements = []
+
+    for element in elements:
+        if not isinstance(
+            element,
+            dict,
+        ):
+            continue
+
+        normalized_elements.append(
+            {
+                "tag": element.get(
+                    "tag",
+                    "",
+                ),
+                "text": element.get(
+                    "text",
+                    "",
+                ),
+                "aria_label": element.get(
+                    "aria_label",
+                    "",
+                ),
+                "placeholder": element.get(
+                    "placeholder",
+                    "",
+                ),
+                "name": element.get(
+                    "name",
+                    "",
+                ),
+                "id": element.get(
+                    "id",
+                    "",
+                ),
+                "input_type": element.get(
+                    "input_type",
+                    "",
+                ),
+                "value": element.get(
+                    "value",
+                    "",
+                ),
+                "enabled": element.get(
+                    "enabled",
+                    True,
+                ),
+                "box": element.get(
+                    "box",
+                    None,
+                ),
+            }
+        )
+
     page_text = payload.get(
         "page_text",
         "",
@@ -146,21 +178,20 @@ def normalize_context(payload):
     ):
         page_text = ""
 
-    if len(page_text) > MAX_PAGE_TEXT_LENGTH:
-        page_text = page_text[
-            :MAX_PAGE_TEXT_LENGTH
-        ]
-
     return {
-        "url": payload.get(
-            "url",
-            "",
+        "url": str(
+            payload.get(
+                "url",
+                "",
+            )
         ),
-        "title": payload.get(
-            "title",
-            "",
+        "title": str(
+            payload.get(
+                "title",
+                "",
+            )
         ),
-        "elements": elements,
+        "elements": normalized_elements,
         "page_text": page_text,
     }
 
@@ -197,24 +228,37 @@ def sanitize_context(payload):
     pii_findings = [
         finding
         for finding in findings
-        if finding.get("type")
-        != "credential"
+        if finding.get("category") == "pii"
+        or finding.get("type")
+        in {
+            "email",
+            "phone",
+            "credit_card",
+            "aadhaar",
+            "pan",
+        }
     ]
 
     credential_findings = [
         finding
         for finding in findings
-        if finding.get("type")
+        if finding.get("category")
+        == "credential"
+        or finding.get("type")
         == "credential"
     ]
 
-    finding_types = sorted(
-        {
-            finding.get("type")
-            for finding in findings
-            if finding.get("type")
-        }
-    )
+    finding_types = []
+
+    for finding in findings:
+        finding_type = finding.get(
+            "type"
+        )
+
+        if finding_type:
+            finding_types.append(
+                finding_type
+            )
 
     return {
         "context": {
@@ -231,12 +275,16 @@ def sanitize_context(payload):
             "credential_findings": len(
                 credential_findings
             ),
-            "types": finding_types,
+            "types": list(
+                dict.fromkeys(
+                    finding_types
+                )
+            ),
         },
     }
 
 
-# Build the browser-agent system prompt.
+# Build the strict local-agent system prompt.
 def build_system_prompt():
     return """
 You are a local privacy-preserving browser agent.
@@ -247,7 +295,14 @@ Your job is to complete the user's browser task using the minimum number of safe
 
 Return ONLY valid JSON.
 
-The JSON must have exactly this structure:
+NEVER return coordinates.
+NEVER return x/y positions.
+NEVER return mouse positions.
+NEVER return screenshots.
+NEVER return markdown.
+NEVER return prose outside JSON.
+
+The ONLY valid response schema is:
 
 {
   "status": "ready",
@@ -263,12 +318,18 @@ The JSON must have exactly this structure:
 For typing:
 
 {
-  "action": "type",
-  "target": "exact visible input",
-  "value": "value explicitly requested by the user"
+  "status": "ready",
+  "reason": "short explanation",
+  "actions": [
+    {
+      "action": "type",
+      "target": "exact visible input",
+      "value": "exact value explicitly provided by the user"
+    }
+  ]
 }
 
-If the task is already completed:
+If the task is already complete:
 
 {
   "status": "completed",
@@ -284,68 +345,69 @@ If the task cannot safely be completed:
   "actions": []
 }
 
-Allowed browser actions are only:
+Allowed browser actions are ONLY:
 
-- click
-- type
+1. click
+2. type
 
-Critical rules:
+Click actions MUST contain:
+- action
+- target
+
+Click actions MUST NOT contain:
+- value
+- coordinate
+- x
+- y
+
+Type actions MUST contain:
+- action
+- target
+- value
+
+Type actions MUST NOT contain:
+- coordinate
+- x
+- y
+
+Security rules:
 
 1. Inspect the CURRENT browser state before deciding anything.
-
-2. Never assume an input contains a value unless the CURRENT browser context explicitly shows that value.
-
+2. Use only information present in the sanitized context.
 3. Never invent personal information.
-
 4. Never invent a value that the user did not provide.
-
-5. Never type into a credential or password field.
-
-6. If the user explicitly requests typing a value into a field and the current field does NOT contain that value, the task is NOT completed.
-
-7. If the requested value is missing from the required field, return the required type action.
-
-8. Only return "completed" when the current browser state provides evidence that the requested task is already complete.
-
-9. The existence of a button does not mean the button should be clicked.
-
-10. Do not repeat an action when the current browser state already shows that its result occurred.
-
-11. If a page explicitly shows that the requested operation succeeded, return "completed".
-
-12. Do not expose or reproduce sanitized PII.
-
-13. If required user information is missing, return "blocked" instead of guessing.
-
-14. Prefer the smallest number of actions.
+5. Never type into password or credential fields.
+6. Never type [EMAIL].
+7. Never type [PHONE].
+8. Never type [CREDIT_CARD].
+9. Never type [AADHAAR].
+10. Never type [PAN].
+11. Never type [REDACTED].
+12. Sanitized values are unavailable private information.
+13. The existence of a button does not mean it should be clicked.
+14. Prefer the exact visible button text as the click target.
+15. Prefer the exact visible placeholder, name, ID, or label as a type target.
+16. Use the minimum number of actions.
+17. Do not repeat an action when its result is already visible.
+18. Only return completed when the CURRENT browser state proves completion.
+19. If required user information is missing, return blocked.
+20. Never use coordinate-based browser control.
+21. Never output an action not supported by the schema.
+22. Return JSON only.
 
 Example:
 
 User task:
-Type Shivansh into the name field and click Search.
+Click the Search button.
 
-Current state:
-Name field is empty.
+Current page:
+A visible button has text "Search".
 
 Correct response:
 
 {
   "status": "ready",
-  "reason": "The name field is empty and must be populated before searching.",
-  "actions": [
-    {
-      "action": "type",
-      "target": "name field",
-      "value": "Shivansh"
-    }
-  ]
-}
-
-After the name field contains Shivansh and the search has not yet happened:
-
-{
-  "status": "ready",
-  "reason": "The name is populated and the search still needs to be performed.",
+  "reason": "The Search button is visible and can be clicked.",
   "actions": [
     {
       "action": "click",
@@ -354,16 +416,16 @@ After the name field contains Shivansh and the search has not yet happened:
   ]
 }
 
-After the page explicitly shows that the search succeeded:
+Incorrect response:
 
 {
-  "status": "completed",
-  "reason": "The requested search completed successfully.",
-  "actions": []
+  "action": "click",
+  "coordinate": [100, 100]
 }
 
-Never return markdown.
-Never return explanations outside JSON.
+The incorrect response is NEVER allowed.
+
+If the model is uncertain about the target, use the visible target text from the sanitized DOM instead of coordinates.
 """.strip()
 
 
@@ -397,12 +459,301 @@ Current sanitized visible page text:
 Determine the minimum safe action required.
 
 IMPORTANT:
-If the task requires typing a specific value, compare that requirement against the CURRENT input value.
 
-Do not say the task is completed merely because the task value was mentioned in the user request.
+Return ONLY one JSON object.
 
-Only return "completed" when the CURRENT browser state proves completion.
+The response MUST contain:
+status
+reason
+actions
+
+The status MUST be one of:
+ready
+completed
+blocked
+
+Every action MUST use only:
+click
+type
+
+For click:
+target is required.
+value is forbidden.
+
+For type:
+target is required.
+value is required.
+
+Coordinates are forbidden.
+
+If you cannot identify a safe visible target, return:
+
+{{
+  "status": "blocked",
+  "reason": "A safe visible target could not be identified.",
+  "actions": []
+}}
 """.strip()
+
+
+# Extract the first JSON object from model output.
+def extract_json_object(raw_text):
+    if not isinstance(
+        raw_text,
+        str,
+    ):
+        return None
+
+    text = raw_text.strip()
+
+    # Remove accidental markdown fences.
+    text = re.sub(
+        r"^```(?:json)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+
+        try:
+            value, _ = decoder.raw_decode(
+                text[index:]
+            )
+
+            if isinstance(
+                value,
+                dict,
+            ):
+                return value
+
+        except json.JSONDecodeError:
+            continue
+
+    return None
+
+
+# Validate and normalize the model response.
+def validate_model_plan(plan):
+    if not isinstance(
+        plan,
+        dict,
+    ):
+        return {
+            "status": "blocked",
+            "reason":
+                "The local model returned an invalid response.",
+            "actions": [],
+        }
+
+    status = plan.get(
+        "status",
+        "",
+    )
+
+    reason = plan.get(
+        "reason",
+        "",
+    )
+
+    actions = plan.get(
+        "actions",
+        [],
+    )
+
+    # Reject legacy coordinate-based model output.
+    if (
+        "coordinate" in plan
+        or "coordinates" in plan
+        or "x" in plan
+        or "y" in plan
+    ):
+        return {
+            "status": "blocked",
+            "reason":
+                "The local model returned an unsafe coordinate-based action.",
+            "actions": [],
+        }
+
+    if status not in {
+        "ready",
+        "completed",
+        "blocked",
+    }:
+        return {
+            "status": "blocked",
+            "reason":
+                "The local model returned an unsupported status.",
+            "actions": [],
+        }
+
+    if not isinstance(
+        reason,
+        str,
+    ):
+        reason = ""
+
+    if not isinstance(
+        actions,
+        list,
+    ):
+        return {
+            "status": "blocked",
+            "reason":
+                "The local model returned invalid actions.",
+            "actions": [],
+        }
+
+    normalized_actions = []
+
+    for action in actions:
+        if not isinstance(
+            action,
+            dict,
+        ):
+            return {
+                "status": "blocked",
+                "reason":
+                    "The local model returned an invalid action.",
+                "actions": [],
+            }
+
+        action_type = action.get(
+            "action",
+            "",
+        )
+
+        target = action.get(
+            "target",
+            "",
+        )
+
+        if action_type not in {
+            "click",
+            "type",
+        }:
+            return {
+                "status": "blocked",
+                "reason":
+                    "The local model returned an unsupported browser action.",
+                "actions": [],
+            }
+
+        if not isinstance(
+            target,
+            str,
+        ) or not target.strip():
+            return {
+                "status": "blocked",
+                "reason":
+                    "The local model returned an action without a target.",
+                "actions": [],
+            }
+
+        if (
+            "coordinate" in action
+            or "coordinates" in action
+            or "x" in action
+            or "y" in action
+        ):
+            return {
+                "status": "blocked",
+                "reason":
+                    "Coordinate-based browser actions are forbidden.",
+                "actions": [],
+            }
+
+        normalized_action = {
+            "action": action_type,
+            "target": target.strip(),
+        }
+
+        if action_type == "type":
+            value = action.get(
+                "value"
+            )
+
+            if not isinstance(
+                value,
+                str,
+            ):
+                return {
+                    "status": "blocked",
+                    "reason":
+                        "The type action does not contain a valid value.",
+                    "actions": [],
+                }
+
+            if value in {
+                "[EMAIL]",
+                "[PHONE]",
+                "[CREDIT_CARD]",
+                "[AADHAAR]",
+                "[PAN]",
+                "[REDACTED]",
+            }:
+                return {
+                    "status": "blocked",
+                    "reason":
+                        "The model attempted to type sanitized private information.",
+                    "actions": [],
+                }
+
+            normalized_action[
+                "value"
+            ] = value
+
+        elif "value" in action:
+            return {
+                "status": "blocked",
+                "reason":
+                    "Click actions cannot contain a value.",
+                "actions": [],
+            }
+
+        normalized_actions.append(
+            normalized_action
+        )
+
+    if status == "completed":
+        if normalized_actions:
+            return {
+                "status": "blocked",
+                "reason":
+                    "A completed response cannot contain browser actions.",
+                "actions": [],
+            }
+
+    if status == "blocked":
+        return {
+            "status": "blocked",
+            "reason":
+                reason
+                or "The local agent blocked the task.",
+            "actions": [],
+        }
+
+    return {
+        "status": "ready",
+        "reason": reason,
+        "actions": normalized_actions,
+    }
 
 
 # Call the local Ollama model.
@@ -423,14 +774,15 @@ def call_ollama(
             },
         ],
         "stream": False,
-        "format": "json",
         "options": {
             "temperature": 0,
         },
+        "format": "json",
     }
 
     body = json.dumps(
-        payload
+        payload,
+        ensure_ascii=False,
     ).encode("utf-8")
 
     request = Request(
@@ -451,295 +803,24 @@ def call_ollama(
             "utf-8"
         )
 
-    data = json.loads(
-        raw
-    )
+    data = json.loads(raw)
 
     message = data.get(
         "message",
         {},
     )
 
-    content = message.get(
+    if not isinstance(
+        message,
+        dict,
+    ):
+        message = {}
+
+    return message.get(
         "content",
         "",
     )
 
-    return {
-        "content": content,
-        "raw": data,
-    }
-
-
-# Extract JSON from model output.
-def parse_model_json(content):
-    if not content:
-        raise ValueError(
-            "Model returned empty content."
-        )
-
-    try:
-        return json.loads(
-            content
-        )
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(
-        r"\{.*\}",
-        content,
-        re.DOTALL,
-    )
-
-    if not match:
-        raise ValueError(
-            "Model response did not contain valid JSON."
-        )
-
-    return json.loads(
-        match.group(0)
-    )
-
-
-# Normalize the model plan.
-def validate_plan(plan):
-    if not isinstance(
-        plan,
-        dict,
-    ):
-        return {
-            "status": "blocked",
-            "reason":
-                "Model plan was not an object.",
-            "actions": [],
-        }
-
-    status = plan.get(
-        "status"
-    )
-
-    if status not in {
-        "ready",
-        "completed",
-        "blocked",
-    }:
-        status = "blocked"
-
-    reason = plan.get(
-        "reason",
-        "",
-    )
-
-    if not isinstance(
-        reason,
-        str,
-    ):
-        reason = ""
-
-    actions = plan.get(
-        "actions",
-        [],
-    )
-
-    if not isinstance(
-        actions,
-        list,
-    ):
-        actions = []
-
-    normalized_actions = []
-
-    for action in actions:
-        if not isinstance(
-            action,
-            dict,
-        ):
-            continue
-
-        action_type = action.get(
-            "action"
-        )
-
-        target = action.get(
-            "target"
-        )
-
-        if not isinstance(
-            action_type,
-            str,
-        ):
-            continue
-
-        if not isinstance(
-            target,
-            str,
-        ):
-            continue
-
-        normalized = {
-            "action":
-                action_type.strip().lower(),
-            "target":
-                target.strip(),
-        }
-
-        if normalized[
-            "action"
-        ] == "type":
-            value = action.get(
-                "value"
-            )
-
-            if not isinstance(
-                value,
-                str,
-            ):
-                continue
-
-            normalized[
-                "value"
-            ] = value
-
-        normalized_actions.append(
-            normalized
-        )
-
-    if status in {
-        "completed",
-        "blocked",
-    }:
-        normalized_actions = []
-
-    return {
-        "status": status,
-        "reason": reason,
-        "actions":
-            normalized_actions,
-    }
-
-
-# Normalize text for comparisons.
-def normalize_text(value):
-    if not isinstance(
-        value,
-        str,
-    ):
-        return ""
-
-    return " ".join(
-        value.strip().lower().split()
-    )
-
-
-# Find an interactive element matching a natural-language target.
-def find_matching_element(
-    elements,
-    target,
-):
-    target_normalized = normalize_text(target)
-
-    if not target_normalized:
-        return None
-
-    exact_fields = [
-        "text",
-        "aria_label",
-        "placeholder",
-        "name",
-        "id",
-    ]
-
-    for element in elements:
-        for field in exact_fields:
-            value = normalize_text(
-                element.get(field)
-            )
-
-            if value == target_normalized:
-                return element
-
-    for element in elements:
-        candidates = []
-
-        for field in exact_fields:
-            value = normalize_text(
-                element.get(field)
-            )
-
-            if value:
-                candidates.append(
-                    value
-                )
-
-        combined = " ".join(
-            candidates
-        )
-
-        if (
-            target_normalized in combined
-            or combined in target_normalized
-        ):
-            return element
-
-    target_without_field = re.sub(
-        r"\b(field|input|textbox)\b",
-        "",
-        target_normalized,
-    ).strip()
-
-    if target_without_field:
-        for element in elements:
-            candidates = []
-
-            for field in exact_fields:
-                value = normalize_text(
-                    element.get(field)
-                )
-
-                if value:
-                    candidates.append(
-                        value
-                    )
-
-            combined = " ".join(
-                candidates
-            )
-
-            if target_without_field in combined:
-                return element
-
-    return None
-
-# Return the safest exact target identifier for an interactive element.
-def canonicalize_action_target(
-    element,
-    fallback_target,
-):
-    if not isinstance(
-        element,
-        dict,
-    ):
-        return fallback_target
-
-    for field in [
-        "aria_label",
-        "placeholder",
-        "name",
-        "id",
-        "text",
-    ]:
-        value = element.get(
-            field,
-            "",
-        )
-
-        if isinstance(
-            value,
-            str,
-        ) and value.strip():
-            return value.strip()
-
-    return fallback_target
 
 # Detect tasks that require user-specific information.
 def extract_missing_user_information(task):
@@ -763,28 +844,16 @@ def extract_missing_user_information(task):
             "your phone number",
         ),
         (
-            r"\bmy\s+number\b",
-            "your number",
-        ),
-        (
             r"\bmy\s+address\b",
             "your address",
-        ),
-        (
-            r"\bmy\s+username\b",
-            "your username",
         ),
         (
             r"\bmy\s+password\b",
             "your password",
         ),
         (
-            r"\bmy\s+date\s+of\s+birth\b",
-            "your date of birth",
-        ),
-        (
-            r"\bmy\s+dob\b",
-            "your date of birth",
+            r"\bmy\s+credit\s+card\b",
+            "your credit card information",
         ),
     ]
 
@@ -800,7 +869,6 @@ def extract_missing_user_information(task):
 
 
 # Extract explicit type requirements from the user task.
-
 def extract_type_requirements(task):
     if not isinstance(
         task,
@@ -812,58 +880,124 @@ def extract_type_requirements(task):
 
     patterns = [
         re.compile(
-            r"""
-            \btype\s+
-            (?P<value>.+?)
-            \s+
-            (?:into|in)\s+
-            (?:the\s+)?
-            (?P<target>.+?)
-            (?=
-                \s+(?:and|then)\s+
-                (?:click|press|select)\b
-                |
-                \s*$
-            )
-            """,
-            re.IGNORECASE |
-            re.VERBOSE,
+            r"\btype\s+(?P<value>.+?)\s+into\s+(?P<target>.+?)(?:\s+and\s+then\s+click\s+.+)?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\benter\s+(?P<value>.+?)\s+into\s+(?P<target>.+?)(?:\s+and\s+then\s+click\s+.+)?$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bfill\s+(?P<target>.+?)\s+with\s+(?P<value>.+?)(?:\s+and\s+then\s+click\s+.+)?$",
+            re.IGNORECASE,
         ),
     ]
 
     for pattern in patterns:
-        for match in pattern.finditer(
-            task
-        ):
-            value = match.group(
-                "value"
-            ).strip()
+        match = pattern.search(task)
 
-            target = match.group(
-                "target"
-            ).strip()
+        if not match:
+            continue
 
-            if (
-                value.startswith('"')
-                and value.endswith('"')
-            ):
-                value = value[1:-1]
+        value = match.group(
+            "value"
+        ).strip()
 
-            if (
-                value.startswith("'")
-                and value.endswith("'")
-            ):
-                value = value[1:-1]
+        target = match.group(
+            "target"
+        ).strip()
 
-            if value and target:
-                requirements.append(
-                    {
-                        "value": value,
-                        "target": target,
-                    }
-                )
+        target = re.sub(
+            r"\s+and\s+then\s+click\s+.+$",
+            "",
+            target,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        if value and target:
+            requirements.append(
+                {
+                    "value": value,
+                    "target": target,
+                }
+            )
 
     return requirements
+
+
+# Find an element matching a target description.
+def find_matching_element(
+    elements,
+    target,
+):
+    if not isinstance(
+        target,
+        str,
+    ):
+        return None
+
+    target_normalized = target.strip().lower()
+
+    if not target_normalized:
+        return None
+
+    for element in elements:
+        if not isinstance(
+            element,
+            dict,
+        ):
+            continue
+
+        candidates = [
+            element.get("text", ""),
+            element.get("aria_label", ""),
+            element.get("placeholder", ""),
+            element.get("name", ""),
+            element.get("id", ""),
+        ]
+
+        for candidate in candidates:
+            if (
+                isinstance(
+                    candidate,
+                    str,
+                )
+                and candidate.strip().lower()
+                == target_normalized
+            ):
+                return element
+
+    for element in elements:
+        if not isinstance(
+            element,
+            dict,
+        ):
+            continue
+
+        candidates = [
+            element.get("text", ""),
+            element.get("aria_label", ""),
+            element.get("placeholder", ""),
+            element.get("name", ""),
+            element.get("id", ""),
+        ]
+
+        for candidate in candidates:
+            if not isinstance(
+                candidate,
+                str,
+            ):
+                continue
+
+            if (
+                target_normalized
+                in candidate.strip().lower()
+                or candidate.strip().lower()
+                in target_normalized
+            ):
+                return element
+
+    return None
 
 
 # Extract an explicit click target from the user task.
@@ -876,11 +1010,11 @@ def extract_click_target(task):
 
     patterns = [
         re.compile(
-            r"\b(?:and|then)\s+click\s+(?:the\s+)?(.+?)\s*$",
+            r"\bclick\s+(?:the\s+)?(.+?)\s*$",
             re.IGNORECASE,
         ),
         re.compile(
-            r"^\s*click\s+(?:the\s+)?(.+?)\s*$",
+            r"\b(?:and|then)\s+click\s+(?:the\s+)?(.+?)\s*$",
             re.IGNORECASE,
         ),
     ]
@@ -896,7 +1030,7 @@ def extract_click_target(task):
         ).strip()
 
         target = re.sub(
-            r"\s+(?:button|link)\s*$",
+            r"^(?:button|link|field|input)\s+(?:with\s+text\s+)?",
             "",
             target,
             flags=re.IGNORECASE,
@@ -908,7 +1042,7 @@ def extract_click_target(task):
     return ""
 
 
-# Enforce explicit task requirements against the current browser state.
+# Enforce explicit type requirements against the current browser state.
 def enforce_type_requirements(
     task,
     context,
@@ -919,6 +1053,45 @@ def enforce_type_requirements(
     )
 
     if not requirements:
+        click_target = extract_click_target(
+            task
+        )
+
+        if click_target:
+            element = find_matching_element(
+                context.get(
+                    "elements",
+                    [],
+                ),
+                click_target,
+            )
+
+            if element:
+                actual_target = (
+                    element.get("text")
+                    or element.get(
+                        "aria_label"
+                    )
+                    or element.get(
+                        "placeholder"
+                    )
+                    or element.get("name")
+                    or element.get("id")
+                    or click_target
+                )
+
+                return {
+                    "status": "ready",
+                    "reason":
+                        "The requested visible target is available.",
+                    "actions": [
+                        {
+                            "action": "click",
+                            "target": actual_target,
+                        }
+                    ],
+                }
+
         return plan
 
     elements = context.get(
@@ -926,77 +1099,77 @@ def enforce_type_requirements(
         [],
     )
 
-    all_requirements_satisfied = True
-
     for requirement in requirements:
         expected_value = requirement[
             "value"
         ]
 
-        target = requirement[
+        target_description = requirement[
             "target"
         ]
 
         element = find_matching_element(
             elements,
-            target,
+            target_description,
         )
 
-        if element is None:
-            all_requirements_satisfied = False
-            continue
+        if not element:
+            return {
+                "status": "blocked",
+                "reason":
+                    "The required input field could not be identified safely.",
+                "actions": [],
+            }
 
-        actual_value = element.get(
+        input_type = str(
+            element.get(
+                "input_type",
+                "",
+            )
+        ).lower()
+
+        if input_type == "password":
+            return {
+                "status": "blocked",
+                "reason":
+                    "Typing into credential fields is blocked.",
+                "actions": [],
+            }
+
+        current_value = element.get(
             "value",
             "",
         )
 
         if not isinstance(
-            actual_value,
+            current_value,
             str,
         ):
-            actual_value = ""
+            current_value = ""
 
-        if actual_value != expected_value:
-            all_requirements_satisfied = False
-
-            return {
-                "status": "ready",
-                "reason":
-                    "The required input value is not present in the current browser state.",
-                "actions": [
-                    {
-                        "action": "type",
-                        "target": target,
-                        "value": expected_value,
-                    }
-                ],
-            }
-
-    if all_requirements_satisfied:
-        click_target = extract_click_target(
-            task
-        )
-
-        if click_target:
-            click_element = find_matching_element(
-                elements,
-                click_target,
+        if current_value == expected_value:
+            click_target = extract_click_target(
+                task
             )
 
-            if click_element is not None:
-                element_type = click_element.get(
-                    "type",
-                    "",
+            if click_target:
+                click_element = find_matching_element(
+                    elements,
+                    click_target,
                 )
 
-                if element_type in {
-                    "button",
-                    "link",
-                }:
-                    actual_target = canonicalize_action_target(
-                        click_element,
-                        click_target,
+                if click_element:
+                    actual_target = (
+                        click_element.get("text")
+                        or click_element.get(
+                            "aria_label"
+                        )
+                        or click_element.get(
+                            "placeholder"
+                        )
+                        or click_element.get("name")
+                        or click_element.get("id")
+                        or click_target
                     )
 
                     return {
@@ -1011,11 +1184,33 @@ def enforce_type_requirements(
                         ],
                     }
 
+            return {
+                "status": "completed",
+                "reason":
+                    "The requested input value is already present in the current browser state.",
+                "actions": [],
+            }
+
+        actual_target = (
+            element.get("placeholder")
+            or element.get("aria_label")
+            or element.get("name")
+            or element.get("id")
+            or element.get("text")
+            or target_description
+        )
+
         return {
-            "status": "completed",
+            "status": "ready",
             "reason":
-                "The requested input value is already present in the current browser state.",
-            "actions": [],
+                "The requested value is not yet present in the required input.",
+            "actions": [
+                {
+                    "action": "type",
+                    "target": actual_target,
+                    "value": expected_value,
+                }
+            ],
         }
 
     return plan
@@ -1057,8 +1252,10 @@ def handle_agent(payload):
         payload
     )
 
-    missing_information = extract_missing_user_information(
-        task
+    missing_information = (
+        extract_missing_user_information(
+            task
+        )
     )
 
     if missing_information:
@@ -1071,11 +1268,9 @@ def handle_agent(payload):
                     OLLAMA_MODEL,
                 "response": {
                     "status":
-                        "requires_user_input",
+                        "blocked",
                     "reason":
                         "The task requires information that only the user can provide.",
-                    "missing_information":
-                        missing_information,
                     "actions": [],
                 },
             },
@@ -1085,12 +1280,14 @@ def handle_agent(payload):
         return {
             "success": False,
             "error":
-                f"Local Ollama model '{OLLAMA_MODEL}' is unavailable.",
-            "privacy":
-                sanitized["privacy"],
+                "Configured Ollama model is unavailable.",
+            "model":
+                OLLAMA_MODEL,
         }
 
-    system_message = build_system_prompt()
+    system_message = (
+        build_system_prompt()
+    )
 
     user_message = build_user_prompt(
         task,
@@ -1098,23 +1295,29 @@ def handle_agent(payload):
     )
 
     try:
-        model_result = call_ollama(
+        raw_response = call_ollama(
             system_message,
             user_message,
         )
 
-        parsed = parse_model_json(
-            model_result["content"]
+        parsed_response = (
+            extract_json_object(
+                raw_response
+            )
         )
 
-        plan = validate_plan(
-            parsed
+        plan = validate_model_plan(
+            parsed_response
         )
 
         plan = enforce_type_requirements(
             task,
             sanitized["context"],
             plan,
+        )
+
+        plan = validate_model_plan(
+            plan
         )
 
         return {
@@ -1127,7 +1330,7 @@ def handle_agent(payload):
                 "response":
                     plan,
                 "raw_response":
-                    model_result["content"],
+                    raw_response,
             },
         }
 
@@ -1139,9 +1342,16 @@ def handle_agent(payload):
             "agent": {
                 "model":
                     OLLAMA_MODEL,
+                "response": {
+                    "status":
+                        "blocked",
+                    "reason":
+                        "The local agent failed to produce a safe action plan.",
+                    "actions": [],
+                },
+                "error":
+                    str(error),
             },
-            "error":
-                str(error),
         }
 
 
@@ -1157,26 +1367,13 @@ class PrivacyBridgeHandler(
     ):
         return
 
-    # Handle CORS preflight.
+    # Handle OPTIONS requests.
     def do_OPTIONS(self):
-        self.send_response(204)
-
-        self.send_header(
-            "Access-Control-Allow-Origin",
-            "*",
+        send_json_response(
+            self,
+            204,
+            {},
         )
-
-        self.send_header(
-            "Access-Control-Allow-Headers",
-            "Content-Type",
-        )
-
-        self.send_header(
-            "Access-Control-Allow-Methods",
-            "GET, POST, OPTIONS",
-        )
-
-        self.end_headers()
 
     # Handle GET requests.
     def do_GET(self):
@@ -1185,9 +1382,11 @@ class PrivacyBridgeHandler(
         )
 
         if parsed_url.path == "/health":
-            ollama_available = check_ollama()
+            ollama_available = (
+                check_ollama()
+            )
 
-            json_response(
+            send_json_response(
                 self,
                 200,
                 {
@@ -1205,7 +1404,7 @@ class PrivacyBridgeHandler(
 
             return
 
-        json_response(
+        send_json_response(
             self,
             404,
             {
@@ -1226,14 +1425,27 @@ class PrivacyBridgeHandler(
                 self
             )
 
-        except Exception as error:
-            json_response(
+        except json.JSONDecodeError:
+            send_json_response(
                 self,
                 400,
                 {
                     "success": False,
                     "error":
-                        f"Invalid JSON: {error}",
+                        "Invalid JSON.",
+                },
+            )
+
+            return
+
+        except Exception as error:
+            send_json_response(
+                self,
+                400,
+                {
+                    "success": False,
+                    "error":
+                        str(error),
                 },
             )
 
@@ -1245,7 +1457,7 @@ class PrivacyBridgeHandler(
                     payload
                 )
 
-                json_response(
+                send_json_response(
                     self,
                     200,
                     result,
@@ -1258,15 +1470,15 @@ class PrivacyBridgeHandler(
                     payload
                 )
 
-                json_response(
+                send_json_response(
                     self,
                     200,
-                    result,
+                    result
                 )
 
                 return
 
-            json_response(
+            send_json_response(
                 self,
                 404,
                 {
@@ -1277,7 +1489,7 @@ class PrivacyBridgeHandler(
             )
 
         except Exception as error:
-            json_response(
+            send_json_response(
                 self,
                 500,
                 {
@@ -1288,20 +1500,23 @@ class PrivacyBridgeHandler(
             )
 
 
-# Start the bridge server.
+# Start the privacy bridge.
 def main():
     server = HTTPServer(
-        (HOST, PORT),
+        (
+            HOST,
+            PORT,
+        ),
         PrivacyBridgeHandler,
     )
 
     print(
-        f"Privacy bridge running at "
+        "Privacy bridge running at "
         f"http://{HOST}:{PORT}"
     )
 
     print(
-        f"Local Ollama model: "
+        "Local Ollama model: "
         f"{OLLAMA_MODEL}"
     )
 

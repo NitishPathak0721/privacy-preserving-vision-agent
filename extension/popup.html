@@ -1,188 +1,717 @@
 ﻿<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Privacy Browser Agent</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Privacy Agent</title>
 
     <style>
         * {
             box-sizing: border-box;
         }
 
+        html,
         body {
-            width: 380px;
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
-            background: #f5f7fa;
-            color: #17202a;
+            width: 100%;
+            min-width: 360px;
+            background: #f5f7fb;
+            font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            color: #101828;
         }
 
+        body {
+            overflow-x: hidden;
+        }
+
+        .app {
+            width: 100%;
+            padding-bottom: 18px;
+        }
+
+        /* Blue branded header. */
         .header {
-            padding: 18px;
-            background: #111827;
+            position: relative;
+            overflow: hidden;
+            padding: 18px 18px 20px;
+            background: linear-gradient(
+                135deg,
+                #1769e0 0%,
+                #2563eb 55%,
+                #3b82f6 100%
+            );
             color: white;
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.18);
         }
 
-        .header h2 {
-            margin: 0 0 5px 0;
-            font-size: 18px;
+        .header::before {
+            content: "";
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            right: -65px;
+            top: -80px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.10);
+            animation: floatOrb 5s ease-in-out infinite;
         }
 
-        .header p {
+        .header::after {
+            content: "";
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            left: 45%;
+            bottom: -65px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            animation: floatOrb 6s ease-in-out infinite reverse;
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .brand-icon {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.98);
+            color: #2563eb;
+            font-size: 22px;
+            font-weight: 800;
+            box-shadow:
+                0 6px 18px rgba(15, 23, 42, 0.18);
+            animation: iconPulse 3s ease-in-out infinite;
+        }
+
+        .brand-text {
+            min-width: 0;
+        }
+
+        .brand-title {
             margin: 0;
+            font-size: 21px;
+            line-height: 1.15;
+            font-weight: 750;
+            letter-spacing: -0.3px;
+        }
+
+        .brand-subtitle {
+            margin: 5px 0 0;
+            font-size: 12px;
+            line-height: 1.3;
+            color: rgba(255, 255, 255, 0.82);
+            white-space: nowrap;
+        }
+
+        .protected {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            flex: 0 0 auto;
+            padding: 8px 11px;
+            border-radius: 999px;
+            background: rgba(236, 253, 245, 0.96);
+            color: #087443;
             font-size: 11px;
-            color: #cbd5e1;
+            font-weight: 700;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.10);
+        }
+
+        .protected-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #12b76a;
+            box-shadow: 0 0 0 0 rgba(18, 183, 106, 0.45);
+            animation: protectedPulse 2s infinite;
         }
 
         .content {
             padding: 14px;
         }
 
-        .section {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
+        .card {
+            position: relative;
+            margin-bottom: 14px;
+            padding: 20px;
+            border: 1px solid #e4e7ec;
+            border-radius: 17px;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow:
+                0 3px 12px rgba(16, 24, 40, 0.035);
+            animation: cardEnter 0.55s ease both;
         }
 
-        .section-title {
+        .card:nth-child(2) {
+            animation-delay: 0.08s;
+        }
+
+        .card-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 11px;
+        }
+
+        .card-title {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: #344054;
+        }
+
+        .firewall-status {
             font-size: 11px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-            color: #475569;
+            font-weight: 600;
+            color: #039855;
+            white-space: nowrap;
         }
 
         textarea {
+            display: block;
             width: 100%;
-            min-height: 75px;
-            padding: 9px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
+            min-height: 116px;
             resize: vertical;
-            font-family: Arial, sans-serif;
-            font-size: 13px;
+            padding: 15px 16px;
+            border: 1px solid #d0d5dd;
+            border-radius: 13px;
             outline: none;
+            background: #ffffff;
+            color: #101828;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1.55;
+            transition:
+                border-color 0.2s ease,
+                box-shadow 0.2s ease,
+                transform 0.2s ease;
+        }
+
+        textarea::placeholder {
+            color: #98a2b3;
+        }
+
+        textarea:hover {
+            border-color: #98a2b3;
         }
 
         textarea:focus {
-            border-color: #64748b;
+            border-color: #2563eb;
+            box-shadow:
+                0 0 0 4px rgba(37, 99, 235, 0.10);
+            transform: translateY(-1px);
         }
 
-        #inspect {
-            width: 100%;
-            margin-top: 9px;
-            padding: 10px;
+        button {
             border: 0;
-            border-radius: 6px;
-            background: #111827;
-            color: white;
-            font-size: 13px;
-            font-weight: bold;
+            font-family: inherit;
             cursor: pointer;
         }
 
+        #inspect {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            height: 50px;
+            margin-top: 14px;
+            border-radius: 13px;
+            background: #101828;
+            color: white;
+            font-size: 14px;
+            font-weight: 700;
+            transition:
+                transform 0.2s ease,
+                box-shadow 0.2s ease,
+                background 0.2s ease;
+        }
+
+        #inspect::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 55%;
+            height: 100%;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(255, 255, 255, 0.16),
+                transparent
+            );
+            transform: skewX(-20deg);
+        }
+
         #inspect:hover {
-            background: #1f2937;
+            background: #172033;
+            transform: translateY(-2px);
+            box-shadow:
+                0 8px 18px rgba(16, 24, 40, 0.16);
+        }
+
+        #inspect:hover::before {
+            animation: buttonShine 0.75s ease;
+        }
+
+        #inspect:active {
+            transform: translateY(0);
         }
 
         #inspect:disabled {
-            opacity: 0.6;
-            cursor: wait;
+            cursor: not-allowed;
+            opacity: 0.65;
+            transform: none;
         }
 
-        .status {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            font-size: 12px;
+        .result-box {
+            position: relative;
+            overflow: hidden;
+            min-height: 141px;
+            padding: 16px;
+            border-radius: 13px;
+            background: #101828;
+            color: #f8fafc;
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
+        .result-box::after {
+            content: "";
+            position: absolute;
+            top: -80px;
+            right: -80px;
+            width: 170px;
+            height: 170px;
             border-radius: 50%;
-            background: #64748b;
+            background: rgba(37, 99, 235, 0.10);
+            animation: resultGlow 5s ease-in-out infinite;
         }
 
-        .status-text {
-            font-weight: bold;
-        }
-
-        pre {
-            margin: 0;
+        #output {
+            position: relative;
+            z-index: 1;
+            min-height: 110px;
             white-space: pre-wrap;
             word-break: break-word;
-            font-size: 10px;
-            line-height: 1.45;
-            max-height: 260px;
-            overflow: auto;
-            background: #0f172a;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.6;
         }
 
-        .privacy-note {
+        .result-label {
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .result-placeholder {
+            color: #98a2b3;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 2px;
+        }
+
+        .stat {
+            position: relative;
+            overflow: hidden;
+            min-height: 74px;
+            padding: 14px;
+            border: 1px solid #e4e7ec;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.95);
+            transition:
+                transform 0.2s ease,
+                box-shadow 0.2s ease,
+                border-color 0.2s ease;
+            animation: statEnter 0.55s ease both;
+        }
+
+        .stat:nth-child(1) {
+            animation-delay: 0.14s;
+        }
+
+        .stat:nth-child(2) {
+            animation-delay: 0.20s;
+        }
+
+        .stat:nth-child(3) {
+            animation-delay: 0.26s;
+        }
+
+        .stat:nth-child(4) {
+            animation-delay: 0.32s;
+        }
+
+        .stat::after {
+            content: "";
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            right: -25px;
+            bottom: -25px;
+            border-radius: 50%;
+            background: rgba(37, 99, 235, 0.055);
+            transition: transform 0.3s ease;
+        }
+
+        .stat:hover {
+            transform: translateY(-3px);
+            border-color: #c7d7fe;
+            box-shadow:
+                0 8px 18px rgba(16, 24, 40, 0.07);
+        }
+
+        .stat:hover::after {
+            transform: scale(2);
+        }
+
+        .stat-name {
+            position: relative;
+            z-index: 1;
+            margin-bottom: 4px;
+            font-size: 14px;
+            font-weight: 750;
+            color: #101828;
+        }
+
+        .stat-description {
+            position: relative;
+            z-index: 1;
+            font-size: 11px;
+            line-height: 1.35;
+            color: #667085;
+        }
+
+        .footer {
+            margin-top: 16px;
+            text-align: center;
             font-size: 10px;
             line-height: 1.4;
-            color: #64748b;
+            color: #98a2b3;
+        }
+
+        .footer-line {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .footer-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #12b76a;
+            animation: protectedPulse 2s infinite;
+        }
+
+        .loading {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #d0d5dd;
+        }
+
+        .loading-dots {
+            display: inline-flex;
+            gap: 3px;
+        }
+
+        .loading-dots span {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: #98a2b3;
+            animation: loadingDots 1.2s infinite;
+        }
+
+        .loading-dots span:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+
+        .loading-dots span:nth-child(3) {
+            animation-delay: 0.30s;
+        }
+
+        /* Header animation. */
+        @keyframes floatOrb {
+            0%,
+            100% {
+                transform: translate3d(0, 0, 0);
+            }
+
+            50% {
+                transform: translate3d(-12px, 10px, 0);
+            }
+        }
+
+        /* Brand icon animation. */
+        @keyframes iconPulse {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.035);
+            }
+        }
+
+        /* Protected indicator animation. */
+        @keyframes protectedPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(18, 183, 106, 0.45);
+            }
+
+            70% {
+                box-shadow: 0 0 0 6px rgba(18, 183, 106, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(18, 183, 106, 0);
+            }
+        }
+
+        /* Button shine animation. */
+        @keyframes buttonShine {
+            from {
+                left: -100%;
+            }
+
+            to {
+                left: 150%;
+            }
+        }
+
+        /* Card entrance animation. */
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Statistics entrance animation. */
+        @keyframes statEnter {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Result background animation. */
+        @keyframes resultGlow {
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 0.7;
+            }
+
+            50% {
+                transform: scale(1.25);
+                opacity: 1;
+            }
+        }
+
+        /* Loading animation. */
+        @keyframes loadingDots {
+            0%,
+            60%,
+            100% {
+                transform: translateY(0);
+                opacity: 0.45;
+            }
+
+            30% {
+                transform: translateY(-4px);
+                opacity: 1;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="header">
-        <h2>Privacy Browser Agent</h2>
-        <p>Local privacy firewall + visual browser agent</p>
-    </div>
+    <div class="app">
 
-    <div class="content">
+        <!-- Blue application header. -->
+        <header class="header">
+            <div class="header-content">
 
-        <div class="section">
-            <div class="section-title">Browser Task</div>
+                <div class="brand">
+                    <div class="brand-icon">
+                        P
+                    </div>
 
-            <textarea
-                id="task"
-                placeholder="Enter your browser task..."
-            ></textarea>
+                    <div class="brand-text">
+                        <h1 class="brand-title">
+                            Privacy Agent
+                        </h1>
 
-            <button id="inspect">
-                Run Agent
-            </button>
-        </div>
+                        <p class="brand-subtitle">
+                            Privacy-preserving browser automation
+                        </p>
+                    </div>
+                </div>
 
-        <div class="section">
-            <div class="section-title">Agent Status</div>
+                <div class="protected">
+                    <span class="protected-dot"></span>
+                    Protected
+                </div>
 
-            <div class="status">
-                <span class="status-dot" id="statusDot"></span>
-                <span class="status-text" id="statusText">
-                    Ready
+            </div>
+        </header>
+
+        <main class="content">
+
+            <!-- Browser task input. -->
+            <section class="card">
+                <div class="card-title-row">
+                    <h2 class="card-title">
+                        Browser task
+                    </h2>
+                </div>
+
+                <textarea
+                    id="task"
+                    placeholder="Example: Type name into the name field and then click Search"
+                    spellcheck="false"
+                ></textarea>
+
+                <button
+                    id="inspect"
+                    type="button"
+                >
+                    Run Agent
+                </button>
+            </section>
+
+            <!-- Agent result. -->
+            <section class="card">
+                <div class="card-title-row">
+                    <h2 class="card-title">
+                        Agent Result
+                    </h2>
+
+                    <span class="firewall-status">
+                        Local privacy firewall
+                    </span>
+                </div>
+
+                <div class="result-box">
+                    <div
+                        id="output"
+                        aria-live="polite"
+                    >
+                        <div class="result-label">
+                            Ready.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- System status cards. -->
+            <section class="stats">
+
+                <div class="stat">
+                    <div class="stat-name">
+                        Local
+                    </div>
+
+                    <div class="stat-description">
+                        Privacy detection
+                    </div>
+                </div>
+
+                <div class="stat">
+                    <div class="stat-name">
+                        Safe DOM
+                    </div>
+
+                    <div class="stat-description">
+                        Sanitized context
+                    </div>
+                </div>
+
+                <div class="stat">
+                    <div class="stat-name">
+                        Qwen2.5-VL
+                    </div>
+
+                    <div class="stat-description">
+                        Local agent model
+                    </div>
+                </div>
+
+                <div class="stat">
+                    <div class="stat-name">
+                        Verified
+                    </div>
+
+                    <div class="stat-description">
+                        Action execution
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- Privacy footer. -->
+            <footer class="footer">
+                <span class="footer-line">
+                    <span class="footer-dot"></span>
+                    Raw sensitive data stays behind the privacy firewall
                 </span>
-            </div>
-        </div>
+            </footer>
 
-        <div class="section">
-            <div class="section-title">Privacy-Safe Result</div>
-
-            <pre id="output">No task executed yet.</pre>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Privacy Protection</div>
-
-            <div class="privacy-note">
-                Sensitive webpage information is detected and
-                sanitized locally before agent reasoning.
-                Credentials and detected PII are not intentionally
-                exposed to the AI model.
-            </div>
-        </div>
-
+        </main>
     </div>
 
     <script src="popup.js"></script>

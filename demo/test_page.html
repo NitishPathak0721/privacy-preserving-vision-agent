@@ -1,38 +1,520 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-    <title>Privacy Browser Agent Demo</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Browser Agent</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f4f7fb;
+            color: #172033;
+        }
+
+        .topbar {
+            background: #101828;
+            color: white;
+            padding: 18px 48px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 19px;
+            font-weight: 700;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            background: #2563eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 17px;
+            font-weight: 800;
+        }
+
+        .topbar-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #b8c4d8;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+
+        .container {
+            max-width: 1080px;
+            margin: 42px auto;
+            padding: 0 24px;
+        }
+
+        .hero {
+            margin-bottom: 28px;
+        }
+
+        .eyebrow {
+            color: #2563eb;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 34px;
+            letter-spacing: -0.03em;
+        }
+
+        .subtitle {
+            margin: 10px 0 0;
+            color: #667085;
+            font-size: 15px;
+            max-width: 700px;
+            line-height: 1.6;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.45fr 0.85fr;
+            gap: 22px;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #e4e7ec;
+            border-radius: 16px;
+            padding: 26px;
+            box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 22px;
+        }
+
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+        }
+
+        .badge {
+            font-size: 11px;
+            font-weight: 700;
+            color: #166534;
+            background: #dcfce7;
+            padding: 6px 9px;
+            border-radius: 999px;
+        }
+
+        .section {
+            margin-bottom: 24px;
+        }
+
+        .section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #667085;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 13px;
+        }
+
+        .profile-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .field.full {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #475467;
+        }
+
+        input {
+            width: 100%;
+            height: 42px;
+            border: 1px solid #d0d5dd;
+            border-radius: 9px;
+            padding: 0 12px;
+            font-size: 14px;
+            color: #172033;
+            background: #fff;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 22px;
+        }
+
+        button {
+            height: 42px;
+            border: 0;
+            border-radius: 9px;
+            padding: 0 18px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .primary {
+            background: #2563eb;
+            color: white;
+        }
+
+        .secondary {
+            background: #eef2f7;
+            color: #344054;
+        }
+
+        .security-list {
+            display: flex;
+            flex-direction: column;
+            gap: 13px;
+        }
+
+        .security-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 13px 14px;
+            border: 1px solid #eaecf0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+
+        .security-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .security-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            background: #eff6ff;
+            color: #2563eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .security-name {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .security-state {
+            font-size: 11px;
+            color: #16a34a;
+            font-weight: 700;
+        }
+
+        .privacy-box {
+            margin-top: 22px;
+            padding: 16px;
+            border-radius: 11px;
+            background: #f8fafc;
+            border: 1px solid #e4e7ec;
+        }
+
+        .privacy-box-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 7px;
+        }
+
+        .privacy-box-text {
+            font-size: 12px;
+            color: #667085;
+            line-height: 1.55;
+        }
+
+        .result {
+            margin-top: 20px;
+            min-height: 72px;
+            border-radius: 10px;
+            background: #101828;
+            color: #d1fadf;
+            padding: 14px;
+            font-family: "SFMono-Regular", Consolas, monospace;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+
+        .footer {
+            text-align: center;
+            color: #98a2b3;
+            font-size: 11px;
+            margin-top: 26px;
+        }
+
+        @media (max-width: 820px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .profile-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .field.full {
+                grid-column: auto;
+            }
+
+            .topbar {
+                padding: 16px 20px;
+            }
+
+            .container {
+                margin: 28px auto;
+            }
+        }
+    </style>
 </head>
 
 <body>
 
-    <h1>Privacy Browser Agent Demo</h1>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">P</div>
+            <span>Privacy Browser Agent</span>
+        </div>
 
-    <h2>Profile</h2>
+        <div class="topbar-status">
+            <span class="status-dot"></span>
+            Local protection active
+        </div>
+    </header>
 
-    <p>Name: Shivansh Srivastava</p>
-    <p>Email: shivansh@example.com</p>
-    <p>Phone: +919876543210</p>
+    <main class="container">
 
-    <input id="name" type="text" placeholder="Enter your name">
+        <section class="hero">
+            <div class="eyebrow">Secure browser automation</div>
+            <h1>Privacy-first browsing workspace</h1>
+            <p class="subtitle">
+                A controlled environment for demonstrating browser automation
+                while sensitive webpage information is detected and sanitized
+                locally before AI reasoning.
+            </p>
+        </section>
 
-    <input id="password" type="password" placeholder="Enter password">
+        <div class="grid">
 
-    <p>Card: 4111 1111 1111 1111</p>
+            <section class="card">
 
-    <button id="search" onclick="document.getElementById('result').innerText = 'Search completed successfully!'">
-        Search
-    </button>
+                <div class="card-header">
+                    <div class="card-title">User Profile</div>
+                    <div class="badge">Protected</div>
+                </div>
 
-    <button id="login">
-        Login
-    </button>
+                <div class="section">
 
-    <p id="result">
-        Welcome to the privacy browser agent testing page.
-    </p>
+                    <div class="section-title">Personal information</div>
+
+                    <div class="profile-grid">
+
+                        <div class="field">
+                            <label for="name">Name</label>
+                            <input
+                                id="name"
+                                name="name"
+                                type="text"
+                                placeholder="Enter your name"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label for="email">Email</label>
+                            <input
+                                id="email"
+                                name="email"
+                                type="text"
+                                value="alex@example.com"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label for="phone">Phone</label>
+                            <input
+                                id="phone"
+                                name="phone"
+                                type="text"
+                                value="+91 90000 12345"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label for="card">Payment card</label>
+                            <input
+                                id="card"
+                                name="card_number"
+                                type="text"
+                                value="4111 1111 1111 1111"
+                            >
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="section">
+
+                    <div class="section-title">Authentication</div>
+
+                    <div class="profile-grid">
+
+                        <div class="field full">
+                            <label for="password">Password</label>
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                value="demo-secret-password"
+                            >
+                        </div>
+
+                    </div>
+
+                    <div class="actions">
+                        <button id="search" class="primary" type="button">
+                            Search
+                        </button>
+
+                        <button id="login" class="secondary" type="button">
+                            Login
+                        </button>
+                    </div>
+
+                </div>
+
+                <div id="result" class="result">
+                    Ready for a browser-agent task.
+                </div>
+
+            </section>
+
+            <aside class="card">
+
+                <div class="card-header">
+                    <div class="card-title">Privacy Firewall</div>
+                    <div class="badge">Active</div>
+                </div>
+
+                <div class="security-list">
+
+                    <div class="security-item">
+                        <div class="security-left">
+                            <div class="security-icon">E</div>
+                            <div class="security-name">Email detection</div>
+                        </div>
+                        <div class="security-state">Protected</div>
+                    </div>
+
+                    <div class="security-item">
+                        <div class="security-left">
+                            <div class="security-icon">P</div>
+                            <div class="security-name">Phone detection</div>
+                        </div>
+                        <div class="security-state">Protected</div>
+                    </div>
+
+                    <div class="security-item">
+                        <div class="security-left">
+                            <div class="security-icon">C</div>
+                            <div class="security-name">Payment data</div>
+                        </div>
+                        <div class="security-state">Protected</div>
+                    </div>
+
+                    <div class="security-item">
+                        <div class="security-left">
+                            <div class="security-icon">K</div>
+                            <div class="security-name">Credentials</div>
+                        </div>
+                        <div class="security-state">Blocked</div>
+                    </div>
+
+                </div>
+
+                <div class="privacy-box">
+                    <div class="privacy-box-title">
+                        Local privacy boundary
+                    </div>
+
+                    <div class="privacy-box-text">
+                        Sensitive information is detected and sanitized
+                        locally before webpage context reaches the AI agent.
+                        Credential fields remain protected from automated
+                        typing.
+                    </div>
+                </div>
+
+            </aside>
+
+        </div>
+
+        <div class="footer">
+            Privacy Browser Agent · Local AI · Privacy Firewall · Verified Actions
+        </div>
+
+    </main>
+
+    <script>
+        const searchButton = document.getElementById("search");
+        const result = document.getElementById("result");
+
+        searchButton.addEventListener("click", () => {
+            result.textContent = "Search completed successfully!";
+        });
+    </script>
 
 </body>
-
 </html>
