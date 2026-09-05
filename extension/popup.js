@@ -182,6 +182,315 @@ function getPostActionContext(result) {
     );
 }
 
+// Normalize text for target comparisons.
+function normalizeTargetText(value) {
+    if (
+        typeof value !== "string"
+    ) {
+        return "";
+    }
+
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+}
+
+// Determine whether an element is suitable for an action.
+function isElementSuitableForAction(
+    element,
+    actionType
+) {
+    if (
+        !element ||
+        typeof element !== "object"
+    ) {
+        return false;
+    }
+
+    const elementType =
+        String(
+            element.type || ""
+        )
+            .trim()
+            .toLowerCase();
+
+    if (actionType === "click") {
+        return [
+            "button",
+            "link"
+        ].includes(elementType);
+    }
+
+    if (actionType === "type") {
+        return [
+            "input",
+            "textarea"
+        ].includes(elementType);
+    }
+
+    return false;
+}
+
+// Check whether a target matches one of an element's identifiers.
+function elementHasExactTarget(
+    element,
+    target
+) {
+    const normalizedTarget =
+        normalizeTargetText(target);
+
+    if (!normalizedTarget) {
+        return false;
+    }
+
+    const fields = [
+        "text",
+        "aria_label",
+        "placeholder",
+        "name",
+        "id"
+    ];
+
+    return fields.some(
+        (field) =>
+            normalizeTargetText(
+                element[field]
+            ) === normalizedTarget
+    );
+}
+
+// Resolve common natural-language target descriptions.
+function elementMatchesSemanticTarget(
+    element,
+    target,
+    actionType
+) {
+    const normalizedTarget =
+        normalizeTargetText(target);
+
+    if (!normalizedTarget) {
+        return false;
+    }
+
+    const fields = [
+        element.text,
+        element.aria_label,
+        element.placeholder,
+        element.name,
+        element.id
+    ]
+        .filter(
+            (value) =>
+                typeof value === "string"
+        )
+        .map(
+            (value) =>
+                normalizeTargetText(value)
+        )
+        .filter(Boolean);
+
+    if (
+        normalizedTarget === "name field" ||
+        normalizedTarget === "name input" ||
+        normalizedTarget === "name textbox" ||
+        normalizedTarget === "name text field" ||
+        normalizedTarget === "enter name" ||
+        normalizedTarget === "enter your name"
+    ) {
+        if (actionType !== "type") {
+            return false;
+        }
+
+        return fields.some(
+            (field) =>
+                field.includes("name")
+        );
+    }
+
+    if (
+        normalizedTarget === "search field" ||
+        normalizedTarget === "search input" ||
+        normalizedTarget === "search box" ||
+        normalizedTarget === "search textbox"
+    ) {
+        if (actionType !== "type") {
+            return false;
+        }
+
+        return fields.some(
+            (field) =>
+                field.includes("search")
+        );
+    }
+
+    if (
+        normalizedTarget === "search button" ||
+        normalizedTarget === "search link" ||
+        normalizedTarget === "search"
+    ) {
+        if (actionType !== "click") {
+            return false;
+        }
+
+        return fields.some(
+            (field) =>
+                field === "search" ||
+                field.includes("search")
+        );
+    }
+
+    if (
+        normalizedTarget.endsWith(" field") ||
+        normalizedTarget.endsWith(" input") ||
+        normalizedTarget.endsWith(" textbox") ||
+        normalizedTarget.endsWith(" button") ||
+        normalizedTarget.endsWith(" link")
+    ) {
+        const strippedTarget =
+            normalizedTarget
+                .replace(
+                    /\s+(field|input|textbox|button|link)$/,
+                    ""
+                )
+                .trim();
+
+        if (!strippedTarget) {
+            return false;
+        }
+
+        return fields.some(
+            (field) =>
+                field === strippedTarget ||
+                field.includes(strippedTarget)
+        );
+    }
+
+    return false;
+}
+
+// Resolve the safest canonical target from the current browser context.
+function canonicalizeActionTarget(
+    action,
+    browserContext
+) {
+    if (
+        !action ||
+        typeof action !== "object"
+    ) {
+        return action;
+    }
+
+    if (
+        typeof action.target !== "string" ||
+        !Array.isArray(
+            browserContext?.elements
+        )
+    ) {
+        return action;
+    }
+
+    const target =
+        action.target.trim();
+
+    if (!target) {
+        return action;
+    }
+
+    const actionType =
+        String(
+            action.action || ""
+        )
+            .trim()
+            .toLowerCase();
+
+    const elements =
+        browserContext.elements.filter(
+            (element) =>
+                isElementSuitableForAction(
+                    element,
+                    actionType
+                )
+        );
+
+    // Prefer exact target matches.
+    const exactMatches =
+        elements.filter(
+            (element) =>
+                elementHasExactTarget(
+                    element,
+                    target
+                )
+        );
+
+    if (exactMatches.length === 1) {
+        const element =
+            exactMatches[0];
+
+        const canonicalTarget =
+            [
+                element.text,
+                element.aria_label,
+                element.placeholder,
+                element.name,
+                element.id
+            ].find(
+                (value) =>
+                    typeof value === "string" &&
+                    value.trim()
+            );
+
+        if (canonicalTarget) {
+            return {
+                ...action,
+                target:
+                    canonicalTarget.trim()
+            };
+        }
+    }
+
+    // Resolve common natural-language targets.
+    const semanticMatches =
+        elements.filter(
+            (element) =>
+                elementMatchesSemanticTarget(
+                    element,
+                    target,
+                    actionType
+                )
+        );
+
+    if (semanticMatches.length !== 1) {
+        return action;
+    }
+
+    const element =
+        semanticMatches[0];
+
+    const canonicalTarget =
+        [
+            element.placeholder,
+            element.aria_label,
+            element.text,
+            element.name,
+            element.id
+        ].find(
+            (value) =>
+                typeof value === "string" &&
+                value.trim()
+        );
+
+    if (!canonicalTarget) {
+        return action;
+    }
+
+    return {
+        ...action,
+        target:
+            canonicalTarget.trim()
+    };
+}
+
 // Execute one browser action.
 async function executeBrowserAction(
     browserAction
@@ -205,11 +514,95 @@ async function executeBrowserAction(
     return response;
 }
 
-// Display a formatted result.
+// Redact common PII before displaying results.
+function redactDisplayText(value) {
+    if (
+        typeof value !== "string"
+    ) {
+        return value;
+    }
+
+    let text = value;
+
+    text = text.replace(
+        /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+        "[EMAIL]"
+    );
+
+    text = text.replace(
+        /(?<!\d)(?:\+91[\s-]?)?[6-9]\d{9}(?!\d)/g,
+        "[PHONE]"
+    );
+
+    text = text.replace(
+        /(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g,
+        "[CREDIT_CARD]"
+    );
+
+    text = text.replace(
+        /(?<!\d)\d{4}[\s-]\d{4}[\s-]\d{4}(?!\d)/g,
+        "[AADHAAR]"
+    );
+
+    text = text.replace(
+        /(?<![A-Z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Z0-9])/gi,
+        "[PAN]"
+    );
+
+    return text;
+}
+
+// Redact PII recursively in popup output.
+function sanitizeDisplayValue(value) {
+    if (
+        typeof value === "string"
+    ) {
+        return redactDisplayText(
+            value
+        );
+    }
+
+    if (Array.isArray(value)) {
+        return value.map(
+            (item) =>
+                sanitizeDisplayValue(
+                    item
+                )
+        );
+    }
+
+    if (
+        value &&
+        typeof value === "object"
+    ) {
+        const sanitized = {};
+
+        for (
+            const [key, item]
+            of Object.entries(value)
+        ) {
+            sanitized[key] =
+                sanitizeDisplayValue(
+                    item
+                );
+        }
+
+        return sanitized;
+    }
+
+    return value;
+}
+
+// Display a privacy-safe formatted result.
 function showResult(result) {
+    const sanitizedResult =
+        sanitizeDisplayValue(
+            result
+        );
+
     output.textContent =
         JSON.stringify(
-            result,
+            sanitizedResult,
             null,
             2
         );
@@ -456,8 +849,15 @@ async function runAgentLoop(task) {
             actionIndex < actions.length;
             actionIndex++
         ) {
-            const action =
+            const originalAction =
                 actions[actionIndex];
+
+            // Resolve model-generated natural-language targets against the safe DOM.
+            const action =
+                canonicalizeActionTarget(
+                    originalAction,
+                    browserContext
+                );
 
             const policy =
                 validateAction(action);
