@@ -76,11 +76,29 @@ function collectSafeDom() {
     });
 }
 
+// Collect visible page text without exposing password values.
+function collectSafePageText() {
+    const clonedDocument = document.documentElement.cloneNode(true);
+
+    clonedDocument.querySelectorAll(
+        'input[type="password"], textarea[type="password"]'
+    ).forEach((element) => {
+        element.value = "[REDACTED]";
+        element.setAttribute("value", "[REDACTED]");
+    });
+
+    return (
+        clonedDocument.innerText ||
+        document.body?.innerText ||
+        ""
+    ).trim();
+}
+
 // Handle DOM collection requests.
 chrome.runtime.onMessage.addListener(
     (message, sender, sendResponse) => {
         if (message.action !== "collect_dom") {
-            return;
+            return false;
         }
 
         try {
@@ -88,7 +106,8 @@ chrome.runtime.onMessage.addListener(
                 success: true,
                 url: window.location.href,
                 title: document.title,
-                elements: collectSafeDom()
+                elements: collectSafeDom(),
+                page_text: collectSafePageText()
             });
         } catch (error) {
             sendResponse({

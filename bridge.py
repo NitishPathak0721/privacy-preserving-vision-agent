@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent.privacy.firewall import inspect_page
 from agent.privacy.sanitizer import sanitize_page
+from agent.privacy.sanitizer import sanitize_page_text
 
 
 HOST = "127.0.0.1"
@@ -167,6 +168,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 findings,
             )
 
+            sanitized_text = sanitize_page_text(
+                page_text,
+                findings,
+            )
+
             finding_types = sorted(
                 {
                     finding.get("type")
@@ -203,7 +209,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                             "",
                         ),
                         "elements": sanitized_elements,
-                        "page_text": page_text,
+                        "page_text": sanitized_text,
                     },
                 },
             )

@@ -2,7 +2,7 @@
 const button = document.getElementById("inspect");
 const output = document.getElementById("output");
 
-// Send browser context through the local privacy firewall.
+// Request browser context and send it through the local privacy firewall.
 button.addEventListener("click", async () => {
     output.textContent = "Inspecting...";
 
@@ -31,7 +31,7 @@ button.addEventListener("click", async () => {
                     url: browserContext.url,
                     title: browserContext.title,
                     elements: browserContext.elements,
-                    page_text: ""
+                    page_text: browserContext.page_text || ""
                 })
             }
         );
