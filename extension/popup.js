@@ -1,15 +1,14 @@
-// Get the popup controls.
-const taskInput = document.getElementById("task");
+﻿const taskInput = document.getElementById("task");
 const inspectButton = document.getElementById("inspect");
 const output = document.getElementById("output");
+const statusDot = document.getElementById("statusDot");
+const statusText = document.getElementById("statusText");
 
-// Actions allowed to execute automatically.
 const ALLOWED_ACTIONS = new Set([
     "click",
     "type"
 ]);
 
-// Actions that require explicit confirmation.
 const BLOCKED_ACTIONS = new Set([
     "submit",
     "delete",
@@ -20,10 +19,12 @@ const BLOCKED_ACTIONS = new Set([
     "navigate"
 ]);
 
-// Maximum number of observe-plan-act cycles.
 const MAX_CYCLES = 5;
 
-// Validate one agent-generated browser action.
+function setStatus(text) {
+    statusText.textContent = text;
+}
+
 function validateAction(action) {
     if (
         !action ||
@@ -84,7 +85,6 @@ function validateAction(action) {
     };
 }
 
-// Send a request to the local privacy bridge.
 async function callBridge(path, payload) {
     const response = await fetch(
         `http://127.0.0.1:8765${path}`,
@@ -106,7 +106,6 @@ async function callBridge(path, payload) {
     return await response.json();
 }
 
-// Get the current privacy-safe browser context.
 async function getBrowserContext() {
     const response =
         await chrome.runtime.sendMessage({
@@ -120,12 +119,9 @@ async function getBrowserContext() {
         );
     }
 
-    return normalizeBrowserContext(
-        response
-    );
+    return normalizeBrowserContext(response);
 }
 
-// Normalize browser context returned by the extension.
 function normalizeBrowserContext(context) {
     if (
         !context ||
@@ -150,7 +146,6 @@ function normalizeBrowserContext(context) {
     };
 }
 
-// Extract the browser state produced immediately after an action.
 function getPostActionContext(result) {
     if (
         !result ||
@@ -182,7 +177,6 @@ function getPostActionContext(result) {
     );
 }
 
-// Normalize text for target comparisons.
 function normalizeTargetText(value) {
     if (
         typeof value !== "string"
@@ -196,7 +190,6 @@ function normalizeTargetText(value) {
         .replace(/\s+/g, " ");
 }
 
-// Determine whether an element is suitable for an action.
 function isElementSuitableForAction(
     element,
     actionType
@@ -232,7 +225,6 @@ function isElementSuitableForAction(
     return false;
 }
 
-// Check whether a target matches one of an element's identifiers.
 function elementHasExactTarget(
     element,
     target
@@ -260,7 +252,6 @@ function elementHasExactTarget(
     );
 }
 
-// Resolve common natural-language target descriptions.
 function elementMatchesSemanticTarget(
     element,
     target,
@@ -369,7 +360,6 @@ function elementMatchesSemanticTarget(
     return false;
 }
 
-// Resolve the safest canonical target from the current browser context.
 function canonicalizeActionTarget(
     action,
     browserContext
@@ -413,7 +403,6 @@ function canonicalizeActionTarget(
                 )
         );
 
-    // Prefer exact target matches.
     const exactMatches =
         elements.filter(
             (element) =>
@@ -449,7 +438,6 @@ function canonicalizeActionTarget(
         }
     }
 
-    // Resolve common natural-language targets.
     const semanticMatches =
         elements.filter(
             (element) =>
@@ -491,7 +479,6 @@ function canonicalizeActionTarget(
     };
 }
 
-// Execute one browser action.
 async function executeBrowserAction(
     browserAction
 ) {
@@ -514,7 +501,6 @@ async function executeBrowserAction(
     return response;
 }
 
-// Redact common PII before displaying results.
 function redactDisplayText(value) {
     if (
         typeof value !== "string"
@@ -552,22 +538,17 @@ function redactDisplayText(value) {
     return text;
 }
 
-// Redact PII recursively in popup output.
 function sanitizeDisplayValue(value) {
     if (
         typeof value === "string"
     ) {
-        return redactDisplayText(
-            value
-        );
+        return redactDisplayText(value);
     }
 
     if (Array.isArray(value)) {
         return value.map(
             (item) =>
-                sanitizeDisplayValue(
-                    item
-                )
+                sanitizeDisplayValue(item)
         );
     }
 
@@ -582,9 +563,7 @@ function sanitizeDisplayValue(value) {
             of Object.entries(value)
         ) {
             sanitized[key] =
-                sanitizeDisplayValue(
-                    item
-                );
+                sanitizeDisplayValue(item);
         }
 
         return sanitized;
@@ -593,12 +572,9 @@ function sanitizeDisplayValue(value) {
     return value;
 }
 
-// Display a privacy-safe formatted result.
 function showResult(result) {
     const sanitizedResult =
-        sanitizeDisplayValue(
-            result
-        );
+        sanitizeDisplayValue(result);
 
     output.textContent =
         JSON.stringify(
@@ -608,7 +584,6 @@ function showResult(result) {
         );
 }
 
-// Normalize text for task comparisons.
 function normalizeTaskText(value) {
     if (
         typeof value !== "string"
@@ -622,7 +597,6 @@ function normalizeTaskText(value) {
         .replace(/\s+/g, " ");
 }
 
-// Check whether the task explicitly ends with a click action.
 function isFinalClickAction(
     task,
     action
@@ -691,7 +665,6 @@ function isFinalClickAction(
     );
 }
 
-// Check whether the page explicitly reports success.
 function pageShowsSuccess(
     browserContext
 ) {
@@ -722,7 +695,6 @@ function pageShowsSuccess(
     );
 }
 
-// Ask the local agent to plan the next step.
 async function getAgentPlan(
     task,
     browserContext
@@ -743,18 +715,23 @@ async function getAgentPlan(
     );
 }
 
-// Execute the autonomous observe-plan-act loop.
 async function runAgentLoop(task) {
     const cycles = [];
 
     let browserContext =
         await getBrowserContext();
 
+    setStatus("Analyzing page...");
+
     for (
         let cycle = 1;
         cycle <= MAX_CYCLES;
         cycle++
     ) {
+        setStatus(
+            `Planning action (${cycle}/${MAX_CYCLES})...`
+        );
+
         output.textContent =
             `Cycle ${cycle}: planning...`;
 
@@ -765,6 +742,8 @@ async function runAgentLoop(task) {
             );
 
         if (!agentResult.success) {
+            setStatus("Agent error");
+
             return {
                 success: false,
                 cycles: cycles,
@@ -781,6 +760,8 @@ async function runAgentLoop(task) {
             agent?.response;
 
         if (!plan) {
+            setStatus("Agent error");
+
             return {
                 success: false,
                 cycles: cycles,
@@ -810,6 +791,8 @@ async function runAgentLoop(task) {
             plan.status === "completed" ||
             plan.status === "done"
         ) {
+            setStatus("Task completed");
+
             return {
                 success: true,
                 status: "completed",
@@ -820,6 +803,8 @@ async function runAgentLoop(task) {
         if (
             plan.status !== "ready"
         ) {
+            setStatus("Agent not ready");
+
             return {
                 success: false,
                 status:
@@ -836,6 +821,8 @@ async function runAgentLoop(task) {
         if (
             actions.length === 0
         ) {
+            setStatus("No action available");
+
             return {
                 success: false,
                 status:
@@ -852,7 +839,6 @@ async function runAgentLoop(task) {
             const originalAction =
                 actions[actionIndex];
 
-            // Resolve model-generated natural-language targets against the safe DOM.
             const action =
                 canonicalizeActionTarget(
                     originalAction,
@@ -878,6 +864,8 @@ async function runAgentLoop(task) {
                         policy.reason
                 };
 
+                setStatus("Action blocked");
+
                 return {
                     success: false,
                     status: "blocked",
@@ -889,6 +877,10 @@ async function runAgentLoop(task) {
                     }
                 };
             }
+
+            setStatus(
+                `Executing ${action.action}...`
+            );
 
             output.textContent =
                 `Cycle ${cycle}: executing ${action.action} on ${action.target}...`;
@@ -903,6 +895,8 @@ async function runAgentLoop(task) {
                     result;
 
                 if (!result.success) {
+                    setStatus("Execution failed");
+
                     return {
                         success: false,
                         status:
@@ -910,6 +904,8 @@ async function runAgentLoop(task) {
                         cycles: cycles
                     };
                 }
+
+                setStatus("Verifying action...");
 
                 const postActionContext =
                     getPostActionContext(
@@ -930,7 +926,6 @@ async function runAgentLoop(task) {
                     actionIndex ===
                     actions.length - 1;
 
-                // Complete the task when the final requested click succeeds.
                 if (
                     isLastAction &&
                     isFinalClickAction(
@@ -938,6 +933,8 @@ async function runAgentLoop(task) {
                         action
                     )
                 ) {
+                    setStatus("Task completed");
+
                     return {
                         success: true,
                         status: "completed",
@@ -947,12 +944,13 @@ async function runAgentLoop(task) {
                     };
                 }
 
-                // Complete when the page explicitly reports success.
                 if (
                     pageShowsSuccess(
                         browserContext
                     )
                 ) {
+                    setStatus("Task completed");
+
                     return {
                         success: true,
                         status: "completed",
@@ -961,12 +959,19 @@ async function runAgentLoop(task) {
                         cycles: cycles
                     };
                 }
+
+                setStatus(
+                    "Action verified"
+                );
+
             } catch (error) {
                 actionRecord.result = {
                     success: false,
                     error:
                         error.message
                 };
+
+                setStatus("Execution failed");
 
                 return {
                     success: false,
@@ -989,6 +994,8 @@ async function runAgentLoop(task) {
         );
     }
 
+    setStatus("Maximum cycles reached");
+
     return {
         success: false,
         status:
@@ -997,7 +1004,6 @@ async function runAgentLoop(task) {
     };
 }
 
-// Start the autonomous browser agent.
 inspectButton.addEventListener(
     "click",
     async () => {
@@ -1005,6 +1011,8 @@ inspectButton.addEventListener(
             taskInput.value.trim();
 
         if (!task) {
+            setStatus("Enter a task");
+
             showResult({
                 success: false,
                 error:
@@ -1013,6 +1021,9 @@ inspectButton.addEventListener(
 
             return;
         }
+
+        inspectButton.disabled = true;
+        setStatus("Starting agent...");
 
         output.textContent =
             "Starting autonomous agent...";
@@ -1024,12 +1035,18 @@ inspectButton.addEventListener(
                 );
 
             showResult(result);
+
         } catch (error) {
+            setStatus("Error");
+
             showResult({
                 success: false,
                 error:
                     error.message
             });
+
+        } finally {
+            inspectButton.disabled = false;
         }
     }
 );

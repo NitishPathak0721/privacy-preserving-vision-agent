@@ -867,6 +867,8 @@ def enforce_type_requirements(
         [],
     )
 
+    all_requirements_satisfied = True
+
     for requirement in requirements:
         expected_value = requirement[
             "value"
@@ -882,6 +884,7 @@ def enforce_type_requirements(
         )
 
         if element is None:
+            all_requirements_satisfied = False
             continue
 
         actual_value = element.get(
@@ -896,6 +899,8 @@ def enforce_type_requirements(
             actual_value = ""
 
         if actual_value != expected_value:
+            all_requirements_satisfied = False
+
             return {
                 "status": "ready",
                 "reason":
@@ -909,42 +914,50 @@ def enforce_type_requirements(
                 ],
             }
 
-    click_target = extract_click_target(
-        task
-    )
-
-    if click_target:
-        click_element = find_matching_element(
-            elements,
-            click_target,
+    if all_requirements_satisfied:
+        click_target = extract_click_target(
+            task
         )
 
-        if click_element is not None:
-            element_type = click_element.get(
-                "type",
-                "",
+        if click_target:
+            click_element = find_matching_element(
+                elements,
+                click_target,
             )
 
-            if element_type in {
-                "button",
-                "link",
-            }:
-                actual_target = canonicalize_action_target(
-                    click_element,
-                    click_target,
+            if click_element is not None:
+                element_type = click_element.get(
+                    "type",
+                    "",
                 )
 
-                return {
-                    "status": "ready",
-                    "reason":
-                        "The required input is already populated and the requested click is the next required action.",
-                    "actions": [
-                        {
-                            "action": "click",
-                            "target": actual_target,
-                        }
-                    ],
-                }
+                if element_type in {
+                    "button",
+                    "link",
+                }:
+                    actual_target = canonicalize_action_target(
+                        click_element,
+                        click_target,
+                    )
+
+                    return {
+                        "status": "ready",
+                        "reason":
+                            "The required input is already populated and the requested click is the next required action.",
+                        "actions": [
+                            {
+                                "action": "click",
+                                "target": actual_target,
+                            }
+                        ],
+                    }
+
+        return {
+            "status": "completed",
+            "reason":
+                "The requested input value is already present in the current browser state.",
+            "actions": [],
+        }
 
     return plan
 

@@ -273,63 +273,104 @@ def infer_task_constraint(
 
     # Detect an explicit type-only request.
     type_match = re.match(
-        r'^\s*type\s+["\'](.+?)["\']\s+into\s+(.+?)\s*$',
+        r'^\s*type\s+(?:["\'](.+?)["\']|(.+?))\s+into\s+(?:the\s+)?(.+?)\s*$',
         goal,
         re.IGNORECASE,
     )
 
     if type_match:
-        value = type_match.group(
-            1
-        )
+        value = (
+            type_match.group(1)
+            if type_match.group(1) is not None
+            else type_match.group(2)
+        ).strip()
 
         requested_target = (
-            type_match.group(2).strip()
+            type_match.group(3).strip()
         )
 
+        target_aliases = {
+            "name": {
+                "name",
+                "name field",
+                "name input",
+                "your name",
+                "enter your name",
+            },
+            "password": {
+                "password",
+                "password field",
+                "password input",
+                "enter password",
+            },
+            "email": {
+                "email",
+                "email field",
+                "email input",
+                "your email",
+                "enter your email",
+            },
+        }
+
+        normalized_target = requested_target.lower()
+
+        resolved_target = requested_target
+
+        for aliases in target_aliases.values():
+            if normalized_target in aliases:
+                for element in elements:
+                    if element.get("type") not in {
+                        "input",
+                        "textarea",
+                    }:
+                        continue
+
+                    candidates = [
+                        element.get("placeholder", ""),
+                        element.get("aria_label", ""),
+                        element.get("name", ""),
+                        element.get("id", ""),
+                    ]
+
+                    for candidate in candidates:
+                        if (
+                            candidate
+                            and candidate.strip().lower() in aliases
+                        ):
+                            resolved_target = candidate.strip()
+                            break
+
+                    if resolved_target != requested_target:
+                        break
+
+                break
+
         for element in elements:
-            if element.get(
-                "type"
-            ) not in {
+            if element.get("type") not in {
                 "input",
                 "textarea",
             }:
                 continue
 
             candidates = [
-                element.get(
-                    "placeholder",
-                    "",
-                ),
-                element.get(
-                    "aria_label",
-                    "",
-                ),
-                element.get(
-                    "name",
-                    "",
-                ),
-                element.get(
-                    "id",
-                    "",
-                ),
+                element.get("placeholder", ""),
+                element.get("aria_label", ""),
+                element.get("name", ""),
+                element.get("id", ""),
             ]
 
             for candidate in candidates:
                 if (
                     candidate
                     and candidate.strip().lower()
-                    == requested_target.lower()
+                    == normalized_target
                 ):
-                    return {
-                        "intent": "type_only",
-                        "target": candidate.strip(),
-                        "value": value,
-                    }
+                    resolved_target = candidate.strip()
+                    break
 
         return {
             "intent": "type_only",
-            "target": requested_target,
+            "target": resolved_target,
             "value": value,
         }
 
@@ -1593,7 +1634,7 @@ def main():
 
                 break
 
-            # Explicit sequences must continue even when Ollama returns an empty plan.
+            # Use deterministic task constraints when the model returns no action.
             if not actions:
                 if task_constraint[
                     "intent"
@@ -1636,18 +1677,46 @@ def main():
 
                 elif task_constraint[
                     "intent"
-                ] in {
-                    "click_only",
-                    "type_only",
-                }:
+                ] == "click_only":
+                    action = {
+                        "action": "click",
+                        "target": task_constraint[
+                            "target"
+                        ],
+                    }
+
+                    actions = [
+                        action
+                    ]
+
                     print(
-                        "\nNo safe action generated "
-                        "for the requested task."
+                        "\nPlanner returned no action. "
+                        "Using deterministic click-only action: "
+                        f"{action['target']}"
                     )
 
-                    all_success = False
+                elif task_constraint[
+                    "intent"
+                ] == "type_only":
+                    action = {
+                        "action": "type",
+                        "target": task_constraint[
+                            "target"
+                        ],
+                        "value": task_constraint[
+                            "value"
+                        ],
+                    }
 
-                    break
+                    actions = [
+                        action
+                    ]
+
+                    print(
+                        "\nPlanner returned no action. "
+                        "Using deterministic type-only action: "
+                        f"{action['target']}"
+                    )
 
                 else:
                     print(

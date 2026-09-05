@@ -1,60 +1,189 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>Privacy Browser Agent</title>
 
     <style>
-        body {
-            width: 320px;
-            padding: 16px;
-            font-family: Arial, sans-serif;
+        * {
+            box-sizing: border-box;
         }
 
-        h3 {
-            margin-top: 0;
+        body {
+            width: 380px;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f7fa;
+            color: #17202a;
+        }
+
+        .header {
+            padding: 18px;
+            background: #111827;
+            color: white;
+        }
+
+        .header h2 {
+            margin: 0 0 5px 0;
+            font-size: 18px;
+        }
+
+        .header p {
+            margin: 0;
+            font-size: 11px;
+            color: #cbd5e1;
+        }
+
+        .content {
+            padding: 14px;
+        }
+
+        .section {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            color: #475569;
         }
 
         textarea {
             width: 100%;
-            box-sizing: border-box;
-            min-height: 90px;
-            padding: 8px;
-            margin-bottom: 10px;
+            min-height: 75px;
+            padding: 9px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
             resize: vertical;
             font-family: Arial, sans-serif;
+            font-size: 13px;
+            outline: none;
         }
 
-        button {
+        textarea:focus {
+            border-color: #64748b;
+        }
+
+        #inspect {
             width: 100%;
+            margin-top: 9px;
             padding: 10px;
+            border: 0;
+            border-radius: 6px;
+            background: #111827;
+            color: white;
+            font-size: 13px;
+            font-weight: bold;
             cursor: pointer;
         }
 
+        #inspect:hover {
+            background: #1f2937;
+        }
+
+        #inspect:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+
+        .status-text {
+            font-weight: bold;
+        }
+
         pre {
+            margin: 0;
             white-space: pre-wrap;
             word-break: break-word;
-            font-size: 11px;
-            max-height: 300px;
+            font-size: 10px;
+            line-height: 1.45;
+            max-height: 260px;
             overflow: auto;
-            margin-top: 12px;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .privacy-note {
+            font-size: 10px;
+            line-height: 1.4;
+            color: #64748b;
         }
     </style>
 </head>
 
 <body>
-    <h3>Privacy Browser Agent</h3>
+    <div class="header">
+        <h2>Privacy Browser Agent</h2>
+        <p>Local privacy firewall + visual browser agent</p>
+    </div>
 
-    <textarea
-        id="task"
-        placeholder="Enter your browser task..."
-    ></textarea>
+    <div class="content">
 
-    <button id="inspect">
-        Run Agent
-    </button>
+        <div class="section">
+            <div class="section-title">Browser Task</div>
 
-    <pre id="output"></pre>
+            <textarea
+                id="task"
+                placeholder="Enter your browser task..."
+            ></textarea>
+
+            <button id="inspect">
+                Run Agent
+            </button>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Agent Status</div>
+
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="status-text" id="statusText">
+                    Ready
+                </span>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Privacy-Safe Result</div>
+
+            <pre id="output">No task executed yet.</pre>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Privacy Protection</div>
+
+            <div class="privacy-note">
+                Sensitive webpage information is detected and
+                sanitized locally before agent reasoning.
+                Credentials and detected PII are not intentionally
+                exposed to the AI model.
+            </div>
+        </div>
+
+    </div>
 
     <script src="popup.js"></script>
 </body>
