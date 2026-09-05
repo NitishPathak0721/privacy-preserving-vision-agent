@@ -11,6 +11,20 @@
             font-family: Arial, sans-serif;
         }
 
+        h3 {
+            margin-top: 0;
+        }
+
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 90px;
+            padding: 8px;
+            margin-bottom: 10px;
+            resize: vertical;
+            font-family: Arial, sans-serif;
+        }
+
         button {
             width: 100%;
             padding: 10px;
@@ -23,6 +37,7 @@
             font-size: 11px;
             max-height: 300px;
             overflow: auto;
+            margin-top: 12px;
         }
     </style>
 </head>
@@ -30,8 +45,13 @@
 <body>
     <h3>Privacy Browser Agent</h3>
 
+    <textarea
+        id="task"
+        placeholder="Enter your browser task..."
+    ></textarea>
+
     <button id="inspect">
-        Inspect Page
+        Run Agent
     </button>
 
     <pre id="output"></pre>
