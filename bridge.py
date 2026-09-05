@@ -741,7 +741,66 @@ def canonicalize_action_target(
 
     return fallback_target
 
+# Detect tasks that require user-specific information.
+def extract_missing_user_information(task):
+    if not isinstance(
+        task,
+        str,
+    ):
+        return ""
+
+    patterns = [
+        (
+            r"\bmy\s+name\b",
+            "your name",
+        ),
+        (
+            r"\bmy\s+email\b",
+            "your email",
+        ),
+        (
+            r"\bmy\s+phone\b",
+            "your phone number",
+        ),
+        (
+            r"\bmy\s+number\b",
+            "your number",
+        ),
+        (
+            r"\bmy\s+address\b",
+            "your address",
+        ),
+        (
+            r"\bmy\s+username\b",
+            "your username",
+        ),
+        (
+            r"\bmy\s+password\b",
+            "your password",
+        ),
+        (
+            r"\bmy\s+date\s+of\s+birth\b",
+            "your date of birth",
+        ),
+        (
+            r"\bmy\s+dob\b",
+            "your date of birth",
+        ),
+    ]
+
+    for pattern, description in patterns:
+        if re.search(
+            pattern,
+            task,
+            re.IGNORECASE,
+        ):
+            return description
+
+    return ""
+
+
 # Extract explicit type requirements from the user task.
+
 def extract_type_requirements(task):
     if not isinstance(
         task,
@@ -997,6 +1056,30 @@ def handle_agent(payload):
     sanitized = sanitize_context(
         payload
     )
+
+    missing_information = extract_missing_user_information(
+        task
+    )
+
+    if missing_information:
+        return {
+            "success": True,
+            "privacy":
+                sanitized["privacy"],
+            "agent": {
+                "model":
+                    OLLAMA_MODEL,
+                "response": {
+                    "status":
+                        "requires_user_input",
+                    "reason":
+                        "The task requires information that only the user can provide.",
+                    "missing_information":
+                        missing_information,
+                    "actions": [],
+                },
+            },
+        }
 
     if not check_ollama():
         return {

@@ -1,14 +1,15 @@
-﻿const taskInput = document.getElementById("task");
+﻿// Get the popup controls.
+const taskInput = document.getElementById("task");
 const inspectButton = document.getElementById("inspect");
 const output = document.getElementById("output");
-const statusDot = document.getElementById("statusDot");
-const statusText = document.getElementById("statusText");
 
+// Actions allowed to execute automatically.
 const ALLOWED_ACTIONS = new Set([
     "click",
     "type"
 ]);
 
+// Actions that require explicit confirmation.
 const BLOCKED_ACTIONS = new Set([
     "submit",
     "delete",
@@ -19,12 +20,10 @@ const BLOCKED_ACTIONS = new Set([
     "navigate"
 ]);
 
+// Maximum number of observe-plan-act cycles.
 const MAX_CYCLES = 5;
 
-function setStatus(text) {
-    statusText.textContent = text;
-}
-
+// Validate one agent-generated browser action.
 function validateAction(action) {
     if (
         !action ||
@@ -85,6 +84,7 @@ function validateAction(action) {
     };
 }
 
+// Send a request to the local privacy bridge.
 async function callBridge(path, payload) {
     const response = await fetch(
         `http://127.0.0.1:8765${path}`,
@@ -106,6 +106,7 @@ async function callBridge(path, payload) {
     return await response.json();
 }
 
+// Get the current privacy-safe browser context.
 async function getBrowserContext() {
     const response =
         await chrome.runtime.sendMessage({
@@ -119,9 +120,12 @@ async function getBrowserContext() {
         );
     }
 
-    return normalizeBrowserContext(response);
+    return normalizeBrowserContext(
+        response
+    );
 }
 
+// Normalize browser context returned by the extension.
 function normalizeBrowserContext(context) {
     if (
         !context ||
@@ -146,6 +150,7 @@ function normalizeBrowserContext(context) {
     };
 }
 
+// Extract the browser state produced immediately after an action.
 function getPostActionContext(result) {
     if (
         !result ||
@@ -177,6 +182,7 @@ function getPostActionContext(result) {
     );
 }
 
+// Normalize text for target comparisons.
 function normalizeTargetText(value) {
     if (
         typeof value !== "string"
@@ -190,6 +196,7 @@ function normalizeTargetText(value) {
         .replace(/\s+/g, " ");
 }
 
+// Determine whether an element is suitable for an action.
 function isElementSuitableForAction(
     element,
     actionType
@@ -225,6 +232,7 @@ function isElementSuitableForAction(
     return false;
 }
 
+// Check whether a target matches one of an element's identifiers.
 function elementHasExactTarget(
     element,
     target
@@ -252,6 +260,7 @@ function elementHasExactTarget(
     );
 }
 
+// Resolve common natural-language target descriptions.
 function elementMatchesSemanticTarget(
     element,
     target,
@@ -295,6 +304,7 @@ function elementMatchesSemanticTarget(
 
         return fields.some(
             (field) =>
+                field === "name" ||
                 field.includes("name")
         );
     }
@@ -360,6 +370,7 @@ function elementMatchesSemanticTarget(
     return false;
 }
 
+// Resolve the safest canonical target from the current browser context.
 function canonicalizeActionTarget(
     action,
     browserContext
@@ -394,8 +405,15 @@ function canonicalizeActionTarget(
             .trim()
             .toLowerCase();
 
+    const allElements =
+        Array.isArray(
+            browserContext.elements
+        )
+            ? browserContext.elements
+            : [];
+
     const elements =
-        browserContext.elements.filter(
+        allElements.filter(
             (element) =>
                 isElementSuitableForAction(
                     element,
@@ -403,6 +421,79 @@ function canonicalizeActionTarget(
                 )
         );
 
+    // Prefer deterministic field identifiers for common type targets.
+    if (
+        actionType === "type" &&
+        [
+            "name field",
+            "name input",
+            "name textbox",
+            "name text field",
+            "enter name",
+            "enter your name"
+        ].includes(
+            normalizeTargetText(target)
+        )
+    ) {
+        const nameMatches =
+            elements.filter(
+                (element) => {
+                    const id =
+                        normalizeTargetText(
+                            element.id
+                        );
+
+                    const name =
+                        normalizeTargetText(
+                            element.name
+                        );
+
+                    const placeholder =
+                        normalizeTargetText(
+                            element.placeholder
+                        );
+
+                    const ariaLabel =
+                        normalizeTargetText(
+                            element.aria_label
+                        );
+
+                    return (
+                        id === "name" ||
+                        name === "name" ||
+                        placeholder === "enter your name" ||
+                        ariaLabel === "name"
+                    );
+                }
+            );
+
+        if (nameMatches.length === 1) {
+            const element =
+                nameMatches[0];
+
+            const canonicalTarget =
+                [
+                    element.placeholder,
+                    element.aria_label,
+                    element.name,
+                    element.id
+                ].find(
+                    (value) =>
+                        typeof value === "string" &&
+                        value.trim()
+                );
+
+            if (canonicalTarget) {
+                return {
+                    ...action,
+                    target:
+                        canonicalTarget.trim()
+                };
+            }
+        }
+    }
+
+    // Prefer exact target matches.
     const exactMatches =
         elements.filter(
             (element) =>
@@ -438,6 +529,7 @@ function canonicalizeActionTarget(
         }
     }
 
+    // Resolve common natural-language targets.
     const semanticMatches =
         elements.filter(
             (element) =>
@@ -479,6 +571,7 @@ function canonicalizeActionTarget(
     };
 }
 
+// Execute one browser action.
 async function executeBrowserAction(
     browserAction
 ) {
@@ -501,54 +594,59 @@ async function executeBrowserAction(
     return response;
 }
 
-function redactDisplayText(value) {
+// Sanitize PII before displaying results.
+function sanitizeDisplayedText(
+    value
+) {
     if (
         typeof value !== "string"
     ) {
         return value;
     }
 
-    let text = value;
-
-    text = text.replace(
-        /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-        "[EMAIL]"
-    );
-
-    text = text.replace(
-        /(?<!\d)(?:\+91[\s-]?)?[6-9]\d{9}(?!\d)/g,
-        "[PHONE]"
-    );
-
-    text = text.replace(
-        /(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g,
-        "[CREDIT_CARD]"
-    );
-
-    text = text.replace(
-        /(?<!\d)\d{4}[\s-]\d{4}[\s-]\d{4}(?!\d)/g,
-        "[AADHAAR]"
-    );
-
-    text = text.replace(
-        /(?<![A-Z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Z0-9])/gi,
-        "[PAN]"
-    );
-
-    return text;
+    return value
+        .replace(
+            /\b[A-Z]{5}\d{4}[A-Z]\b/gi,
+            "[PAN]"
+        )
+        .replace(
+            /\b\d{4}\s?\d{4}\s?\d{4}\b/g,
+            "[AADHAAR]"
+        )
+        .replace(
+            /\b(?:\d[ -]?){13,19}\b/g,
+            "[CREDIT_CARD]"
+        )
+        .replace(
+            /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+            "[EMAIL]"
+        )
+        .replace(
+            /(?:\+91[\s-]?)?[6-9]\d{9}\b/g,
+            "[PHONE]"
+        );
 }
 
-function sanitizeDisplayValue(value) {
+// Recursively sanitize values before displaying them.
+function sanitizeDisplayedValue(
+    value
+) {
     if (
         typeof value === "string"
     ) {
-        return redactDisplayText(value);
+        return sanitizeDisplayedText(
+            value
+        );
     }
 
-    if (Array.isArray(value)) {
+    if (
+        Array.isArray(value)
+    ) {
         return value.map(
             (item) =>
-                sanitizeDisplayValue(item)
+                sanitizeDisplayedValue(
+                    item
+                )
         );
     }
 
@@ -559,11 +657,27 @@ function sanitizeDisplayValue(value) {
         const sanitized = {};
 
         for (
-            const [key, item]
-            of Object.entries(value)
+            const [
+                key,
+                item
+            ] of Object.entries(value)
         ) {
-            sanitized[key] =
-                sanitizeDisplayValue(item);
+            if (
+                key === "value" &&
+                typeof item === "string"
+            ) {
+                sanitized[key] =
+                    item.includes("[REDACTED]")
+                        ? "[REDACTED]"
+                        : sanitizeDisplayedText(
+                            item
+                        );
+            } else {
+                sanitized[key] =
+                    sanitizeDisplayedValue(
+                        item
+                    );
+            }
         }
 
         return sanitized;
@@ -572,156 +686,57 @@ function sanitizeDisplayValue(value) {
     return value;
 }
 
-function showResult(result) {
-    const sanitizedResult =
-        sanitizeDisplayValue(result);
+// Display the final result safely.
+function showResult(
+    result
+) {
+    const safeResult =
+        sanitizeDisplayedValue(
+            result
+        );
 
     output.textContent =
         JSON.stringify(
-            sanitizedResult,
+            safeResult,
             null,
             2
         );
 }
 
-function normalizeTaskText(value) {
-    if (
-        typeof value !== "string"
-    ) {
-        return "";
-    }
-
-    return value
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, " ");
-}
-
-function isFinalClickAction(
-    task,
-    action
+// Update agent status.
+function setStatus(
+    status,
+    type = "idle"
 ) {
-    if (
-        !action ||
-        typeof action !== "object"
-    ) {
-        return false;
-    }
-
-    if (
-        String(action.action || "")
-            .trim()
-            .toLowerCase() !== "click"
-    ) {
-        return false;
-    }
-
-    const normalizedTask =
-        normalizeTaskText(task);
-
-    if (!normalizedTask) {
-        return false;
-    }
-
-    const match =
-        normalizedTask.match(
-            /(?:^|\s)(?:and\s+|then\s+)?click\s+(?:the\s+)?(.+?)\s*$/
+    const statusText =
+        document.getElementById(
+            "status-text"
         );
 
-    if (!match) {
-        return false;
-    }
-
-    let requestedTarget =
-        match[1].trim();
-
-    requestedTarget =
-        requestedTarget.replace(
-            /\s+(?:button|link)$/,
-            ""
-        ).trim();
-
-    const actionTarget =
-        normalizeTaskText(
-            action.target
+    const statusDot =
+        document.getElementById(
+            "status-dot"
         );
 
-    requestedTarget =
-        normalizeTaskText(
-            requestedTarget
-        );
-
-    if (
-        !requestedTarget ||
-        !actionTarget
-    ) {
-        return false;
+    if (statusText) {
+        statusText.textContent =
+            status;
     }
 
-    return (
-        requestedTarget === actionTarget ||
-        requestedTarget.includes(actionTarget) ||
-        actionTarget.includes(requestedTarget)
-    );
-}
-
-function pageShowsSuccess(
-    browserContext
-) {
-    if (
-        !browserContext ||
-        typeof browserContext.page_text !==
-            "string"
-    ) {
-        return false;
+    if (statusDot) {
+        statusDot.className =
+            `status-dot ${type}`;
     }
-
-    const pageText =
-        browserContext.page_text
-            .toLowerCase();
-
-    const successIndicators = [
-        "successfully",
-        "success",
-        "completed successfully",
-        "operation completed",
-        "search completed",
-        "task completed"
-    ];
-
-    return successIndicators.some(
-        (indicator) =>
-            pageText.includes(indicator)
-    );
 }
 
-async function getAgentPlan(
-    task,
-    browserContext
+// Run the autonomous observe-plan-act loop.
+async function runAgentLoop(
+    task
 ) {
-    return await callBridge(
-        "/agent",
-        {
-            task: task,
-            url:
-                browserContext.url,
-            title:
-                browserContext.title,
-            elements:
-                browserContext.elements,
-            page_text:
-                browserContext.page_text || ""
-        }
-    );
-}
-
-async function runAgentLoop(task) {
-    const cycles = [];
-
     let browserContext =
         await getBrowserContext();
 
-    setStatus("Analyzing page...");
+    const cycles = [];
 
     for (
         let cycle = 1;
@@ -729,55 +744,42 @@ async function runAgentLoop(task) {
         cycle++
     ) {
         setStatus(
-            `Planning action (${cycle}/${MAX_CYCLES})...`
+            `Cycle ${cycle}: inspecting browser`,
+            "running"
         );
 
-        output.textContent =
-            `Cycle ${cycle}: planning...`;
+        browserContext =
+            await getBrowserContext();
 
         const agentResult =
-            await getAgentPlan(
-                task,
-                browserContext
+            await callBridge(
+                "/agent",
+                {
+                    task: task,
+                    url: browserContext.url,
+                    title: browserContext.title,
+                    elements: browserContext.elements,
+                    page_text: browserContext.page_text || ""
+                }
             );
 
-        if (!agentResult.success) {
-            setStatus("Agent error");
-
-            return {
-                success: false,
-                cycles: cycles,
-                error:
-                    agentResult.error ||
-                    "Agent planning failed."
-            };
-        }
-
-        const agent =
-            agentResult.agent;
-
         const plan =
-            agent?.response;
-
-        if (!plan) {
-            setStatus("Agent error");
-
-            return {
-                success: false,
-                cycles: cycles,
-                error:
-                    "Agent returned no plan."
-            };
-        }
+            agentResult?.agent?.response ||
+            agentResult?.plan ||
+            agentResult?.response ||
+            agentResult;
 
         const cycleRecord = {
             cycle: cycle,
             privacy:
-                agentResult.privacy,
+                plan.privacy || {},
             agent: {
                 model:
-                    agent.model,
+                    plan.model ||
+                    "qwen2.5vl:3b",
                 response:
+                    plan.plan ||
+                    plan.response ||
                     plan
             },
             actions: []
@@ -788,14 +790,65 @@ async function runAgentLoop(task) {
         );
 
         if (
-            plan.status === "completed" ||
-            plan.status === "done"
+            plan.status ===
+            "requires_user_input"
         ) {
-            setStatus("Task completed");
+            setStatus(
+                `User input required: ${
+                    plan.missing_information ||
+                    "required information"
+                }`,
+                "warning"
+            );
+
+            return {
+                success: false,
+                status:
+                    "requires_user_input",
+                reason:
+                    plan.reason ||
+                    "The task requires information that only the user can provide.",
+                missing_information:
+                    plan.missing_information ||
+                    "",
+                cycles: cycles
+            };
+        }
+
+        if (
+            plan.status ===
+            "blocked"
+        ) {
+            setStatus(
+                "Action blocked by security policy",
+                "error"
+            );
+
+            return {
+                success: false,
+                status: "blocked",
+                reason:
+                    plan.reason ||
+                    "The action was blocked.",
+                cycles: cycles
+            };
+        }
+
+        if (
+            plan.status ===
+            "completed"
+        ) {
+            setStatus(
+                "Task completed",
+                "success"
+            );
 
             return {
                 success: true,
                 status: "completed",
+                reason:
+                    plan.reason ||
+                    "Task completed successfully.",
                 cycles: cycles
             };
         }
@@ -803,7 +856,10 @@ async function runAgentLoop(task) {
         if (
             plan.status !== "ready"
         ) {
-            setStatus("Agent not ready");
+            setStatus(
+                "Agent not ready",
+                "error"
+            );
 
             return {
                 success: false,
@@ -821,7 +877,10 @@ async function runAgentLoop(task) {
         if (
             actions.length === 0
         ) {
-            setStatus("No action available");
+            setStatus(
+                "No executable action",
+                "error"
+            );
 
             return {
                 success: false,
@@ -839,6 +898,7 @@ async function runAgentLoop(task) {
             const originalAction =
                 actions[actionIndex];
 
+            // Resolve model-generated natural-language targets against the safe DOM.
             const action =
                 canonicalizeActionTarget(
                     originalAction,
@@ -864,7 +924,10 @@ async function runAgentLoop(task) {
                         policy.reason
                 };
 
-                setStatus("Action blocked");
+                setStatus(
+                    "Action blocked",
+                    "error"
+                );
 
                 return {
                     success: false,
@@ -879,11 +942,9 @@ async function runAgentLoop(task) {
             }
 
             setStatus(
-                `Executing ${action.action}...`
+                `Cycle ${cycle}: executing ${action.action} on ${action.target}`,
+                "running"
             );
-
-            output.textContent =
-                `Cycle ${cycle}: executing ${action.action} on ${action.target}...`;
 
             try {
                 const result =
@@ -895,7 +956,10 @@ async function runAgentLoop(task) {
                     result;
 
                 if (!result.success) {
-                    setStatus("Execution failed");
+                    setStatus(
+                        "Action failed",
+                        "error"
+                    );
 
                     return {
                         success: false,
@@ -904,8 +968,6 @@ async function runAgentLoop(task) {
                         cycles: cycles
                     };
                 }
-
-                setStatus("Verifying action...");
 
                 const postActionContext =
                     getPostActionContext(
@@ -922,18 +984,219 @@ async function runAgentLoop(task) {
                         await getBrowserContext();
                 }
 
-                const isLastAction =
-                    actionIndex ===
-                    actions.length - 1;
+                const verification =
+                    result.verification;
 
                 if (
-                    isLastAction &&
-                    isFinalClickAction(
-                        task,
-                        action
-                    )
+                    verification &&
+                    verification.success === false
                 ) {
-                    setStatus("Task completed");
+                    setStatus(
+                        "Action verification failed",
+                        "error"
+                    );
+
+                    return {
+                        success: false,
+                        status:
+                            "verification_failed",
+                        cycles: cycles
+                    };
+                }
+
+                if (
+                    verification &&
+                    verification.success === true
+                ) {
+                    actionRecord.result =
+                        result;
+                }
+
+                const refreshedContext =
+                    await getBrowserContext();
+
+                browserContext =
+                    refreshedContext;
+
+                // Continue explicit type-then-click tasks after successful typing.
+                const sequenceMatch =
+                    task.match(
+                        /^type\s+(.+?)\s+into\s+(.+?)\s+and\s+then\s+click\s+(.+)$/i
+                    );
+
+                if (
+                    sequenceMatch &&
+                    action.action === "type"
+                ) {
+                    const clickTarget =
+                        sequenceMatch[3].trim();
+
+                    const clickAction = {
+                        action: "click",
+                        target: clickTarget
+                    };
+
+                    const canonicalClickAction =
+                        canonicalizeActionTarget(
+                            clickAction,
+                            browserContext
+                        );
+
+                    const clickPolicy =
+                        validateAction(
+                            canonicalClickAction
+                        );
+
+                    const clickRecord = {
+                        action:
+                            canonicalClickAction,
+                        policy:
+                            clickPolicy
+                    };
+
+                    cycleRecord.actions.push(
+                        clickRecord
+                    );
+
+                    if (!clickPolicy.allowed) {
+                        clickRecord.result = {
+                            success: false,
+                            error:
+                                clickPolicy.reason
+                        };
+
+                        setStatus(
+                            "Action blocked",
+                            "error"
+                        );
+
+                        return {
+                            success: false,
+                            status: "blocked",
+                            cycles: cycles
+                        };
+                    }
+
+                    setStatus(
+                        `Cycle ${cycle}: executing click on ${canonicalClickAction.target}`,
+                        "running"
+                    );
+
+                    const clickResult =
+                        await executeBrowserAction(
+                            canonicalClickAction
+                        );
+
+                    clickRecord.result =
+                        clickResult;
+
+                    if (!clickResult.success) {
+                        setStatus(
+                            "Action failed",
+                            "error"
+                        );
+
+                        return {
+                            success: false,
+                            status:
+                                "execution_failed",
+                            cycles: cycles
+                        };
+                    }
+
+                    const clickPostActionContext =
+                        getPostActionContext(
+                            clickResult
+                        );
+
+                    if (
+                        clickPostActionContext
+                    ) {
+                        browserContext =
+                            clickPostActionContext;
+                    } else {
+                        browserContext =
+                            await getBrowserContext();
+                    }
+
+                    const clickVerification =
+                        clickResult.verification;
+
+                    if (
+                        clickVerification &&
+                        clickVerification.success === false
+                    ) {
+                        setStatus(
+                            "Action verification failed",
+                            "error"
+                        );
+
+                        return {
+                            success: false,
+                            status:
+                                "verification_failed",
+                            cycles: cycles
+                        };
+                    }
+
+                    const finalContext =
+                        await getBrowserContext();
+
+                    browserContext =
+                        finalContext;
+
+                    if (
+                        finalContext.page_text
+                            .toLowerCase()
+                            .includes(
+                                "search completed successfully"
+                            )
+                    ) {
+                        setStatus(
+                            "Task completed",
+                            "success"
+                        );
+
+                        return {
+                            success: true,
+                            status: "completed",
+                            reason:
+                                "The requested type-and-click sequence completed successfully.",
+                            cycles: cycles
+                        };
+                    }
+
+                    if (
+                        clickVerification &&
+                        clickVerification.success === true
+                    ) {
+                        setStatus(
+                            "Task completed",
+                            "success"
+                        );
+
+                        return {
+                            success: true,
+                            status: "completed",
+                            reason:
+                                "The requested type-and-click sequence was executed successfully.",
+                            cycles: cycles
+                        };
+                    }
+                }
+
+                if (
+                    action.action === "click" &&
+                    refreshedContext.page_text
+                        .toLowerCase()
+                        .includes(
+                            "completed successfully"
+                        )
+                ) {
+                    setStatus(
+                        "Task completed",
+                        "success"
+                    );
 
                     return {
                         success: true,
@@ -945,11 +1208,16 @@ async function runAgentLoop(task) {
                 }
 
                 if (
-                    pageShowsSuccess(
-                        browserContext
-                    )
+                    refreshedContext.page_text
+                        .toLowerCase()
+                        .includes(
+                            "search completed successfully"
+                        )
                 ) {
-                    setStatus("Task completed");
+                    setStatus(
+                        "Task completed",
+                        "success"
+                    );
 
                     return {
                         success: true,
@@ -959,11 +1227,6 @@ async function runAgentLoop(task) {
                         cycles: cycles
                     };
                 }
-
-                setStatus(
-                    "Action verified"
-                );
-
             } catch (error) {
                 actionRecord.result = {
                     success: false,
@@ -971,7 +1234,10 @@ async function runAgentLoop(task) {
                         error.message
                 };
 
-                setStatus("Execution failed");
+                setStatus(
+                    "Action failed",
+                    "error"
+                );
 
                 return {
                     success: false,
@@ -982,8 +1248,10 @@ async function runAgentLoop(task) {
             }
         }
 
-        output.textContent =
-            `Cycle ${cycle}: state updated.`;
+        setStatus(
+            `Cycle ${cycle}: state updated`,
+            "running"
+        );
 
         await new Promise(
             (resolve) =>
@@ -994,7 +1262,10 @@ async function runAgentLoop(task) {
         );
     }
 
-    setStatus("Maximum cycles reached");
+    setStatus(
+        "Maximum cycles reached",
+        "error"
+    );
 
     return {
         success: false,
@@ -1004,6 +1275,7 @@ async function runAgentLoop(task) {
     };
 }
 
+// Start the autonomous browser agent.
 inspectButton.addEventListener(
     "click",
     async () => {
@@ -1011,19 +1283,26 @@ inspectButton.addEventListener(
             taskInput.value.trim();
 
         if (!task) {
-            setStatus("Enter a task");
-
             showResult({
                 success: false,
                 error:
                     "Please enter a browser task."
             });
 
+            setStatus(
+                "Enter a browser task",
+                "warning"
+            );
+
             return;
         }
 
         inspectButton.disabled = true;
-        setStatus("Starting agent...");
+
+        setStatus(
+            "Starting autonomous agent...",
+            "running"
+        );
 
         output.textContent =
             "Starting autonomous agent...";
@@ -1035,16 +1314,19 @@ inspectButton.addEventListener(
                 );
 
             showResult(result);
-
         } catch (error) {
-            setStatus("Error");
+            setStatus(
+                "Action failed",
+                "error"
+            );
 
             showResult({
                 success: false,
+                status:
+                    "execution_failed",
                 error:
                     error.message
             });
-
         } finally {
             inspectButton.disabled = false;
         }
