@@ -1289,8 +1289,14 @@ async function runAgentLoop(task) {
                     };
                 }
 
-                // Complete when the page explicitly reports success.
+                // Page success cannot finish an explicit multi-step task.
+                const explicitSequence =
+                    /^\s*type\s+(.+?)\s+into\s+(.+?)\s+and(?:\s+then)?\s+click\s+(.+?)\s*$/i.test(
+                        task
+                    );
+
                 if (
+                    !explicitSequence &&
                     pageShowsSuccess(
                         browserContext
                     )
