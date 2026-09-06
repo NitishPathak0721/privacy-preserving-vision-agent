@@ -78,6 +78,9 @@ function sendMessageToTab(
 
 // Find a usable browser tab.
 async function getActiveBrowserTab() {
+    const DEMO_URL =
+        "https://sih-2026-demo-clone.vercel.app/login";
+
     const windows = await chrome.windows.getAll({
         populate: true
     });
@@ -99,54 +102,39 @@ async function getActiveBrowserTab() {
     const targetWindow =
         focusedWindow || browserWindows[0];
 
-    // Prefer the active tab only when it has a real page URL.
-    const activeUsableTab =
+    const activeTab =
+        targetWindow.tabs.find(
+            (tab) => tab.active
+        );
+
+    if (
+        activeTab &&
+        typeof activeTab.url === "string" &&
+        activeTab.url.length > 0 &&
+        !activeTab.url.startsWith("chrome://") &&
+        !activeTab.url.startsWith("chrome-extension://") &&
+        !activeTab.url.startsWith("devtools://")
+    ) {
+        return activeTab;
+    }
+
+    const existingDemoTab =
         targetWindow.tabs.find(
             (tab) =>
-                tab.active &&
                 typeof tab.url === "string" &&
-                tab.url.length > 0 &&
-                !tab.url.startsWith("chrome://") &&
-                !tab.url.startsWith("chrome-extension://") &&
-                !tab.url.startsWith("devtools://")
+                tab.url.startsWith(DEMO_URL)
         );
 
-    if (activeUsableTab) {
-        return activeUsableTab;
+    if (existingDemoTab) {
+        return existingDemoTab;
     }
 
-    // Fall back to any usable page tab in the focused window.
-    const usableTab =
-        targetWindow.tabs.find(
-            (tab) =>
-                typeof tab.url === "string" &&
-                tab.url.length > 0 &&
-                !tab.url.startsWith("chrome://") &&
-                !tab.url.startsWith("chrome-extension://") &&
-                !tab.url.startsWith("devtools://")
-        );
+    const demoTab = await chrome.tabs.create({
+        url: DEMO_URL,
+        active: true
+    });
 
-    if (usableTab) {
-        return usableTab;
-    }
-
-    // Last fallback: search every normal browser window.
-    for (const window of browserWindows) {
-        const tab = window.tabs.find(
-            (candidate) =>
-                typeof candidate.url === "string" &&
-                candidate.url.length > 0 &&
-                !candidate.url.startsWith("chrome://") &&
-                !candidate.url.startsWith("chrome-extension://") &&
-                !candidate.url.startsWith("devtools://")
-        );
-
-        if (tab) {
-            return tab;
-        }
-    }
-
-    return null;
+    return demoTab;
 }
 
 // Forward extension requests to the active browser tab.

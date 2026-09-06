@@ -647,6 +647,7 @@ def validate_model_plan(plan):
         if action_type not in {
             "click",
             "type",
+            "navigate",
         }:
             return {
                 "status": "blocked",
