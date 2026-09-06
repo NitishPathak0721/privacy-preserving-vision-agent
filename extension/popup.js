@@ -223,10 +223,23 @@ function isElementSuitableForAction(
     }
 
     if (actionType === "type") {
-        return [
-            "input",
-            "textarea"
-        ].includes(elementType);
+        if (
+            ![
+                "input",
+                "textarea"
+            ].includes(elementType)
+        ) {
+            return false;
+        }
+
+        const inputType =
+            String(
+                element.input_type || ""
+            )
+                .trim()
+                .toLowerCase();
+
+        return inputType !== "password";
     }
 
     return false;
@@ -369,7 +382,7 @@ function elementMatchesSemanticTarget(
     return false;
 }
 
-// Resolve the safest canonical target from the current browser context.
+// Resolve an action target against the safe browser DOM.
 function canonicalizeActionTarget(
     action,
     browserContext
@@ -404,8 +417,150 @@ function canonicalizeActionTarget(
             .trim()
             .toLowerCase();
 
+    const allElements =
+        browserContext.elements;
+
+    // Type actions can only target editable non-password fields.
+    if (
+        actionType === "type"
+    ) {
+        const editableElements =
+            allElements.filter(
+                (element) =>
+                    isElementSuitableForAction(
+                        element,
+                        "type"
+                    )
+            );
+
+        // Prefer an exact editable target.
+        const exactEditableMatches =
+            editableElements.filter(
+                (element) =>
+                    elementHasExactTarget(
+                        element,
+                        target
+                    )
+            );
+
+        if (
+            exactEditableMatches.length === 1
+        ) {
+            const element =
+                exactEditableMatches[0];
+
+            const canonicalTarget =
+                [
+                    element.placeholder,
+                    element.aria_label,
+                    element.name,
+                    element.id
+                ].find(
+                    (value) =>
+                        typeof value === "string" &&
+                        value.trim()
+                );
+
+            if (canonicalTarget) {
+                return {
+                    ...action,
+                    target:
+                        canonicalTarget.trim()
+                };
+            }
+        }
+
+        // Resolve semantic field targets such as "name field".
+        const semanticEditableMatches =
+            editableElements.filter(
+                (element) =>
+                    elementMatchesSemanticTarget(
+                        element,
+                        target,
+                        "type"
+                    )
+            );
+
+        if (
+            semanticEditableMatches.length === 1
+        ) {
+            const element =
+                semanticEditableMatches[0];
+
+            const canonicalTarget =
+                [
+                    element.placeholder,
+                    element.aria_label,
+                    element.name,
+                    element.id
+                ].find(
+                    (value) =>
+                        typeof value === "string" &&
+                        value.trim()
+                );
+
+            if (canonicalTarget) {
+                return {
+                    ...action,
+                    target:
+                        canonicalTarget.trim()
+                };
+            }
+        }
+
+        // Detect when the model selected a non-editable control.
+        const nonEditableTargetMatches =
+            allElements.filter(
+                (element) =>
+                    !isElementSuitableForAction(
+                        element,
+                        "type"
+                    ) &&
+                    elementHasExactTarget(
+                        element,
+                        target
+                    )
+            );
+
+        // If exactly one safe editable field exists, use it instead.
+        if (
+            nonEditableTargetMatches.length > 0 &&
+            editableElements.length === 1
+        ) {
+            const element =
+                editableElements[0];
+
+            const canonicalTarget =
+                [
+                    element.placeholder,
+                    element.aria_label,
+                    element.name,
+                    element.id
+                ].find(
+                    (value) =>
+                        typeof value === "string" &&
+                        value.trim()
+                );
+
+            if (canonicalTarget) {
+                return {
+                    ...action,
+                    target:
+                        canonicalTarget.trim()
+                };
+            }
+        }
+
+        // Never allow a type action to retain a non-editable target.
+        return {
+            ...action,
+            target: ""
+        };
+    }
+
+    // Click actions may target safe interactive elements.
     const elements =
-        browserContext.elements.filter(
+        allElements.filter(
             (element) =>
                 isElementSuitableForAction(
                     element,
@@ -423,7 +578,9 @@ function canonicalizeActionTarget(
                 )
         );
 
-    if (exactMatches.length === 1) {
+    if (
+        exactMatches.length === 1
+    ) {
         const element =
             exactMatches[0];
 
@@ -449,7 +606,7 @@ function canonicalizeActionTarget(
         }
     }
 
-    // Resolve common natural-language targets.
+    // Resolve common natural-language click targets.
     const semanticMatches =
         elements.filter(
             (element) =>
@@ -460,7 +617,9 @@ function canonicalizeActionTarget(
                 )
         );
 
-    if (semanticMatches.length !== 1) {
+    if (
+        semanticMatches.length !== 1
+    ) {
         return action;
     }
 
@@ -469,9 +628,9 @@ function canonicalizeActionTarget(
 
     const canonicalTarget =
         [
-            element.placeholder,
-            element.aria_label,
             element.text,
+            element.aria_label,
+            element.placeholder,
             element.name,
             element.id
         ].find(
@@ -628,7 +787,9 @@ function getSimpleProblemMessage(result) {
         }
 
         if (
-            reason.includes("information that only the user can provide")
+            reason.includes(
+                "information that only the user can provide"
+            )
         ) {
             return "Problem: Some information needed for this task was not provided.";
         }

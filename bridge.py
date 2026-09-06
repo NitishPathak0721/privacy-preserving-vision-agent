@@ -929,6 +929,7 @@ def extract_type_requirements(task):
 def find_matching_element(
     elements,
     target,
+    element_kind=None,
 ):
     if not isinstance(
         target,
@@ -941,13 +942,46 @@ def find_matching_element(
     if not target_normalized:
         return None
 
-    for element in elements:
+    # Restrict matching by the action that will use the element.
+    def is_compatible(element):
         if not isinstance(
             element,
             dict,
         ):
-            continue
+            return False
 
+        tag = str(
+            element.get("tag", "")
+        ).strip().lower()
+
+        input_type = str(
+            element.get("input_type", "")
+        ).strip().lower()
+
+        if element_kind == "type":
+            return (
+                tag in {
+                    "input",
+                    "textarea",
+                }
+                and input_type != "password"
+            )
+
+        if element_kind == "click":
+            return tag in {
+                "button",
+                "a",
+            }
+
+        return True
+
+    compatible_elements = [
+        element
+        for element in elements
+        if is_compatible(element)
+    ]
+
+    for element in compatible_elements:
         candidates = [
             element.get("text", ""),
             element.get("aria_label", ""),
@@ -967,13 +1001,7 @@ def find_matching_element(
             ):
                 return element
 
-    for element in elements:
-        if not isinstance(
-            element,
-            dict,
-        ):
-            continue
-
+    for element in compatible_elements:
         candidates = [
             element.get("text", ""),
             element.get("aria_label", ""),
@@ -989,10 +1017,14 @@ def find_matching_element(
             ):
                 continue
 
+            candidate_normalized = (
+                candidate.strip().lower()
+            )
+
             if (
                 target_normalized
-                in candidate.strip().lower()
-                or candidate.strip().lower()
+                in candidate_normalized
+                or candidate_normalized
                 in target_normalized
             ):
                 return element
@@ -1111,6 +1143,7 @@ def enforce_type_requirements(
         element = find_matching_element(
             elements,
             target_description,
+            element_kind="type",
         )
 
         if not element:

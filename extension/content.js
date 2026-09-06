@@ -107,7 +107,6 @@ function collectPageState() {
         page_text: collectSafePageText()
     };
 }
-
 // Find a visible interactive element using exact or descriptive targets.
 function findTarget(target) {
     const normalizedTarget =
@@ -122,6 +121,102 @@ function findTarget(target) {
             "button, input, textarea, select, a"
         )
     );
+
+    // Prefer editable fields for type actions described as fields.
+    const fieldWords =
+        /\b(field|input|textbox|text box)\b/i.test(
+            normalizedTarget
+        );
+
+    if (fieldWords) {
+        const fieldCandidates =
+            elements.filter((element) => {
+                return element.matches(
+                    "input:not([type='password']), textarea"
+                );
+            });
+
+        const targetWords =
+            normalizedTarget
+                .toLowerCase()
+                .replace(
+                    /\b(field|input|textbox|text box)\b/g,
+                    ""
+                )
+                .trim();
+
+        if (targetWords) {
+            const semanticMatches =
+                fieldCandidates.filter((element) => {
+                    const values = [
+                        element.getAttribute("name") || "",
+                        element.id || "",
+                        element.getAttribute("placeholder") || "",
+                        element.getAttribute("aria-label") || ""
+                    ];
+
+                    return values.some((value) =>
+                        value
+                            .toLowerCase()
+                            .includes(targetWords)
+                    );
+                });
+
+            if (semanticMatches.length === 1) {
+                return semanticMatches[0];
+            }
+        }
+
+        // Match common natural-language field names.
+        const lowerTarget =
+            normalizedTarget.toLowerCase();
+
+        const semanticFieldMatches =
+            fieldCandidates.filter((element) => {
+                const values = [
+                    element.getAttribute("name") || "",
+                    element.id || "",
+                    element.getAttribute("placeholder") || "",
+                    element.getAttribute("aria-label") || ""
+                ]
+                    .join(" ")
+                    .toLowerCase();
+
+                if (
+                    lowerTarget.includes("name") &&
+                    /\bname\b/.test(values)
+                ) {
+                    return true;
+                }
+
+                if (
+                    lowerTarget.includes("email") &&
+                    /\bemail\b/.test(values)
+                ) {
+                    return true;
+                }
+
+                if (
+                    lowerTarget.includes("phone") &&
+                    /\b(phone|mobile|telephone)\b/.test(values)
+                ) {
+                    return true;
+                }
+
+                if (
+                    lowerTarget.includes("search") &&
+                    /\bsearch\b/.test(values)
+                ) {
+                    return true;
+                }
+
+                return false;
+            });
+
+        if (semanticFieldMatches.length === 1) {
+            return semanticFieldMatches[0];
+        }
+    }
 
     // Try exact matches first.
     const exactMatches = elements.filter((element) => {
@@ -204,7 +299,6 @@ function findTarget(target) {
 
     return null;
 }
-
 // Verify that a type action changed the target value.
 function verifyTypeAction(target, expectedValue) {
     if (!target) {
@@ -353,6 +447,15 @@ async function executeAction(action) {
             };
         }
 
+        if (
+            !target.matches("input, textarea")
+        ) {
+            return {
+                success: false,
+                error:
+                    "Typing is only allowed into input or textarea fields."
+            };
+        }
         target.focus();
 
         target.value =
@@ -477,3 +580,7 @@ console.log(
     "Privacy Browser Agent content script loaded:",
     window.location.href
 );
+
+
+
+

@@ -110,103 +110,85 @@ def infer_task_constraint(
     # Normalize the user goal.
     goal = (user_goal or "").strip()
 
-    # Detect an explicit ordered sequence before handling single-action tasks.
-    sequence_pattern = re.compile(
-        r"type\s+[\"'](.+?)[\"']\s+into\s+(.+?)\s+and\s+click\s+(.+?)\s*$",
+    # Detect an explicit ordered type-then-click sequence.
+    sequence_match = re.match(
+        r"^\s*type\s+(.+?)\s+into\s+(.+?)\s+and(?:\s+then)?\s+click\s+(.+?)\s*$",
+        goal,
         re.IGNORECASE,
     )
 
-    sequence_match = sequence_pattern.match(
-        goal
-    )
-
     if sequence_match:
-        type_value = (
-            sequence_match.group(1).strip()
-        )
+        type_value = sequence_match.group(1).strip()
+        type_target = sequence_match.group(2).strip()
+        click_target = sequence_match.group(3).strip()
 
-        type_target = (
-            sequence_match.group(2).strip()
-        )
+        # Remove optional quotation marks around the value.
+        if (
+            len(type_value) >= 2
+            and type_value[0] == type_value[-1]
+            and type_value[0] in {"'", '"'}
+        ):
+            type_value = type_value[1:-1].strip()
 
-        click_target = (
-            sequence_match.group(3).strip()
-        )
+        # Remove optional leading "the".
+        if type_target.lower().startswith("the "):
+            type_target = type_target[4:].strip()
 
-        resolved_type_target = (
-            type_target
-        )
+        if click_target.lower().startswith("the "):
+            click_target = click_target[4:].strip()
 
-        resolved_click_target = (
-            click_target
-        )
+        resolved_type_target = type_target
+        resolved_click_target = click_target
 
+        # Resolve the typing target only against editable fields.
         for element in elements:
-            if element.get(
-                "type"
-            ) in {
+            if element.get("type") not in {
                 "input",
                 "textarea",
             }:
-                candidates = [
-                    element.get(
-                        "placeholder",
-                        "",
-                    ),
-                    element.get(
-                        "aria_label",
-                        "",
-                    ),
-                    element.get(
-                        "name",
-                        "",
-                    ),
-                    element.get(
-                        "id",
-                        "",
-                    ),
-                ]
+                continue
 
-                for candidate in candidates:
-                    if (
-                        candidate
-                        and candidate.strip().lower()
-                        == type_target.lower()
-                    ):
-                        resolved_type_target = (
-                            candidate.strip()
-                        )
+            candidates = [
+                element.get("placeholder", ""),
+                element.get("aria_label", ""),
+                element.get("name", ""),
+                element.get("id", ""),
+                element.get("text", ""),
+            ]
 
-                        break
+            for candidate in candidates:
+                if (
+                    isinstance(candidate, str)
+                    and candidate.strip().lower()
+                    == type_target.lower()
+                ):
+                    resolved_type_target = candidate.strip()
+                    break
 
-            if element.get(
-                "type"
-            ) in {
+        # Resolve the click target only against clickable elements.
+        for element in elements:
+            if element.get("type") not in {
                 "button",
                 "link",
+                "a",
             }:
-                candidates = [
-                    element.get(
-                        "text",
-                        "",
-                    ),
-                    element.get(
-                        "aria_label",
-                        "",
-                    ),
-                ]
+                continue
 
-                for candidate in candidates:
-                    if (
-                        candidate
-                        and candidate.strip().lower()
-                        == click_target.lower()
-                    ):
-                        resolved_click_target = (
-                            candidate.strip()
-                        )
+            candidates = [
+                element.get("text", ""),
+                element.get("aria_label", ""),
+                element.get("name", ""),
+                element.get("id", ""),
+            ]
 
-                        break
+            for candidate in candidates:
+                if (
+                    isinstance(candidate, str)
+                    and candidate.strip().lower()
+                    == click_target.lower()
+                ):
+                    resolved_click_target = candidate.strip()
+                    break
 
         return {
             "intent": "sequence",
@@ -223,217 +205,57 @@ def infer_task_constraint(
             ],
         }
 
-    # Detect an explicit click-only request.
-    click_match = re.match(
-        r"^\s*click\s+(?:the\s+)?(.+?)(?:\s+(?:button|link))?\s*$",
-        goal,
+    # Detect a simple click-only task.
+    click_pattern = re.compile(
+        r"^\s*(?:click|press|select)\s+(?:the\s+)?(.+?)\s*$",
         re.IGNORECASE,
     )
 
+    click_match = click_pattern.match(goal)
+
     if click_match:
-        requested_target = (
-            click_match.group(1).strip()
-        )
-
-        for element in elements:
-            if element.get(
-                "type"
-            ) not in {
-                "button",
-                "link",
-            }:
-                continue
-
-            candidates = [
-                element.get(
-                    "text",
-                    "",
-                ),
-                element.get(
-                    "aria_label",
-                    "",
-                ),
-            ]
-
-            for candidate in candidates:
-                if (
-                    candidate
-                    and candidate.strip().lower()
-                    == requested_target.lower()
-                ):
-                    return {
-                        "intent": "click_only",
-                        "target": candidate.strip(),
-                    }
+        target = click_match.group(1).strip()
 
         return {
             "intent": "click_only",
-            "target": requested_target,
+            "target": target,
         }
 
-    # Detect an explicit type-only request.
-    type_match = re.match(
-        r'^\s*type\s+(?:["\'](.+?)["\']|(.+?))\s+into\s+(?:the\s+)?(.+?)\s*$',
-        goal,
+    # Detect a simple type-only task.
+    type_pattern = re.compile(
+        r"^\s*type\s+[\"'](.+?)[\"']\s+into\s+(?:the\s+)?(.+?)\s*$",
         re.IGNORECASE,
     )
 
+    type_match = type_pattern.match(goal)
+
     if type_match:
-        value = (
-            type_match.group(1)
-            if type_match.group(1) is not None
-            else type_match.group(2)
-        ).strip()
-
-        requested_target = (
-            type_match.group(3).strip()
-        )
-
-        target_aliases = {
-            "name": {
-                "name",
-                "name field",
-                "name input",
-                "your name",
-                "enter your name",
-            },
-            "password": {
-                "password",
-                "password field",
-                "password input",
-                "enter password",
-            },
-            "email": {
-                "email",
-                "email field",
-                "email input",
-                "your email",
-                "enter your email",
-            },
-        }
-
-        normalized_target = requested_target.lower()
-
-        resolved_target = requested_target
-
-        for aliases in target_aliases.values():
-            if normalized_target in aliases:
-                for element in elements:
-                    if element.get("type") not in {
-                        "input",
-                        "textarea",
-                    }:
-                        continue
-
-                    candidates = [
-                        element.get("placeholder", ""),
-                        element.get("aria_label", ""),
-                        element.get("name", ""),
-                        element.get("id", ""),
-                    ]
-
-                    for candidate in candidates:
-                        if (
-                            candidate
-                            and candidate.strip().lower() in aliases
-                        ):
-                            resolved_target = candidate.strip()
-                            break
-
-                    if resolved_target != requested_target:
-                        break
-
-                break
-
-        for element in elements:
-            if element.get("type") not in {
-                "input",
-                "textarea",
-            }:
-                continue
-
-            candidates = [
-                element.get("placeholder", ""),
-                element.get("aria_label", ""),
-                element.get("name", ""),
-                element.get("id", ""),
-            ]
-
-            for candidate in candidates:
-                if (
-                    candidate
-                    and candidate.strip().lower()
-                    == normalized_target
-                ):
-                    resolved_target = candidate.strip()
-                    break
-
         return {
             "intent": "type_only",
-            "target": resolved_target,
-            "value": value,
+            "target": type_match.group(2).strip(),
+            "value": type_match.group(1).strip(),
         }
 
-    # Detect requests that require information from the user.
-    missing_information_patterns = [
-        (
-            r"\bmy\s+name\b",
-            "your name",
-        ),
-        (
-            r"\bmy\s+email\b",
-            "your email",
-        ),
-        (
-            r"\bmy\s+phone\b",
-            "your phone number",
-        ),
-        (
-            r"\bmy\s+number\b",
-            "your number",
-        ),
-        (
-            r"\bmy\s+address\b",
-            "your address",
-        ),
-        (
-            r"\bmy\s+username\b",
-            "your username",
-        ),
-        (
-            r"\bmy\s+password\b",
-            "your password",
-        ),
-        (
-            r"\bmy\s+date\s+of\s+birth\b",
-            "your date of birth",
-        ),
-        (
-            r"\bmy\s+dob\b",
-            "your date of birth",
-        ),
-    ]
+    # Detect an unquoted type-only task.
+    type_plain_pattern = re.compile(
+        r"^\s*type\s+(.+?)\s+into\s+(?:the\s+)?(.+?)\s*$",
+        re.IGNORECASE,
+    )
 
-    for pattern, description in missing_information_patterns:
-        if re.search(
-            pattern,
-            goal,
-            re.IGNORECASE,
-        ):
-            return {
-                "intent": "requires_user_input",
-                "target": "",
-                "missing_information": description,
-            }
+    type_plain_match = type_plain_pattern.match(goal)
 
-    # Fall back to a general task.
+    if type_plain_match:
+        return {
+            "intent": "type_only",
+            "target": type_plain_match.group(2).strip(),
+            "value": type_plain_match.group(1).strip(),
+        }
+
     return {
         "intent": "general",
-        "target": "",
     }
 
 
-# Send sanitized webpage context and safe visual context to the local AI planner.
 def ask_ollama(
     user_goal,
     elements,
@@ -2191,6 +2013,17 @@ def main():
         if (
             all_success
             and task_completed
+            and (
+                task_constraint.get("intent")
+                != "sequence"
+                or len(action_history)
+                >= len(
+                    task_constraint.get(
+                        "steps",
+                        [],
+                    )
+                )
+            )
         ):
             print(
                 "                    TASK COMPLETED"
