@@ -1,13 +1,18 @@
+import os
 import requests
 import json
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+load_dotenv()
+OLLAMA_URL = os.getenv("OLLAMA_URL")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
 
 def ask_ollama(prompt):
     response = requests.post(
-        "http://localhost:11434/api/generate",
+       f"{OLLAMA_URL}/api/generate",
         json={
-            "model": "llama3.2:3b",
+            "model": OLLAMA_MODEL,
             "prompt": prompt,
             "stream": False
         }
