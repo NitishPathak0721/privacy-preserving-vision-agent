@@ -3,6 +3,61 @@ const taskInput = document.getElementById("task");
 const inspectButton = document.getElementById("inspect");
 const output = document.getElementById("output");
 
+// =========================
+// AEGISAI PIPELINE UI
+// =========================
+
+const pipelineSteps = {
+    perceive: document.querySelector('[data-step="perceive"]'),
+    protect: document.querySelector('[data-step="protect"]'),
+    plan: document.querySelector('[data-step="plan"]'),
+    act: document.querySelector('[data-step="act"]'),
+    verify: document.querySelector('[data-step="verify"]')
+};
+
+function resetPipeline() {
+    Object.values(pipelineSteps).forEach((step) => {
+        if (!step) return;
+
+        step.classList.remove("active", "completed");
+
+        const icon = step.querySelector(".step-icon");
+
+        if (icon) {
+            icon.textContent = "○";
+        }
+    });
+}
+
+function setPipelineStep(stepName, status = "active") {
+    const step = pipelineSteps[stepName];
+
+    if (!step) return;
+
+    step.classList.remove("active", "completed");
+
+    const icon = step.querySelector(".step-icon");
+
+    if (status === "active") {
+        step.classList.add("active");
+
+        if (icon) {
+            icon.textContent = "◉";
+        }
+    }
+
+    if (status === "completed") {
+        step.classList.add("completed");
+
+        if (icon) {
+            icon.textContent = "✓";
+        }
+    }
+}
+
+function completePipelineStep(stepName) {
+    setPipelineStep(stepName, "completed");
+}
 // Actions allowed to execute automatically.
 const ALLOWED_ACTIONS = new Set([
     "click",
@@ -1073,8 +1128,25 @@ async function getAgentPlan(
 async function runAgentLoop(task) {
     const cycles = [];
 
+     // Reset pipeline for a new task
+    resetPipeline();
+
+    // STEP 1: PERCEIVE
+    setPipelineStep("perceive", "active");
+
     let browserContext =
         await getBrowserContext();
+
+    completePipelineStep("perceive");
+
+    // STEP 2: PROTECT
+    setPipelineStep("protect", "active");
+
+    // Privacy layer processes browser context
+    completePipelineStep("protect");
+
+    // STEP 3: PLAN
+    setPipelineStep("plan", "active");
 
     for (
         let cycle = 1;
@@ -1089,7 +1161,7 @@ async function runAgentLoop(task) {
                 task,
                 browserContext
             );
-
+            completePipelineStep("plan");
         if (!agentResult.success) {
             return {
                 success: false,
@@ -1228,7 +1300,7 @@ async function runAgentLoop(task) {
                     }
                 };
             }
-
+            setPipelineStep("act", "active");
             output.textContent =
                 `Cycle ${cycle}: executing ${action.action} on ${action.target}...`;
 
@@ -1240,7 +1312,8 @@ async function runAgentLoop(task) {
 
                 actionRecord.result =
                     result;
-
+                completePipelineStep("act");
+                setPipelineStep("verify", "active");   
                 if (!result.success) {
                     return {
                         success: false,
@@ -1267,7 +1340,7 @@ async function runAgentLoop(task) {
                     browserContext =
                         await getBrowserContext();
                 }
-
+                completePipelineStep("verify");
                 const isLastAction =
                     actionIndex ===
                     actions.length - 1;
@@ -1329,7 +1402,9 @@ async function runAgentLoop(task) {
 
         output.textContent =
             `Cycle ${cycle}: state updated.`;
-
+        if (cycle < MAX_CYCLES) {
+    setPipelineStep("plan", "active");
+}
         await new Promise(
             (resolve) =>
                 setTimeout(
