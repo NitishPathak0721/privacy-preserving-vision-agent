@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Agent Result</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background: #f5f7fa;
+            color: #1d2939;
+        }
+
+        .container {
+            width: min(760px, calc(100% - 40px));
+            margin: 60px auto;
+        }
+
+        .header {
+            margin-bottom: 28px;
+        }
+
+        .brand {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            margin-top: 6px;
+            color: #667085;
+            font-size: 14px;
+        }
+
+        .status {
+            display: inline-block;
+            margin-top: 18px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: #ecfdf3;
+            color: #067647;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .card {
+            background: #ffffff;
+            border: 1px solid #e4e7ec;
+            border-radius: 14px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 18px;
+        }
+
+        .transaction {
+            border: 1px solid #eaecf0;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
+        .transaction-line {
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .transaction-line:first-child {
+            font-weight: 600;
+        }
+
+        .privacy {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #eaecf0;
+            color: #667085;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .empty {
+            color: #667085;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div class="header">
+            <div class="brand">Privacy Agent</div>
+            <div class="subtitle">
+                Privacy-preserving browser automation
+            </div>
+            <div class="status">Agent completed</div>
+        </div>
+
+        <section class="card">
+            <div class="title">Agent Result</div>
+
+            <div id="transactions">
+                <div class="empty">
+                    Waiting for agent result...
+                </div>
+            </div>
+
+            <div class="privacy">
+                Sensitive webpage information remains behind the
+                local privacy firewall. Only task-relevant information
+                is returned to the user.
+            </div>
+        </section>
+    </main>
+
+    <script src="result.js"></script>
+</body>
+</html>

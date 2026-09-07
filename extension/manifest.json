@@ -5,7 +5,8 @@
   "description": "Local privacy firewall for AI browser agents.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -25,6 +26,17 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "result.html",
+        "result.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

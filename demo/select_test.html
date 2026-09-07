@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Select Action Test</title>
+</head>
+<body>
+    <h1>Browser Agent Select Test</h1>
+
+    <label for="country">Country</label>
+    <select id="country" name="country">
+        <option value="">Select country</option>
+        <option value="india">India</option>
+        <option value="usa">United States</option>
+        <option value="uk">United Kingdom</option>
+        <option value="japan">Japan</option>
+    </select>
+
+    <p id="result"></p>
+
+    <script>
+        document.getElementById("country").addEventListener("change", function () {
+            document.getElementById("result").textContent =
+                "Selected: " + this.options[this.selectedIndex].text;
+        });
+    </script>
+</body>
+</html>

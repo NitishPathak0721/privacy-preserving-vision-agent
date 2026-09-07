@@ -974,6 +974,9 @@ def find_matching_element(
                 "a",
             }
 
+        if element_kind == "select":
+            return tag == "select"
+
         return True
 
     compatible_elements = [
@@ -981,6 +984,48 @@ def find_matching_element(
         for element in elements
         if is_compatible(element)
     ]
+
+    if element_kind == "select":
+        cleaned_target = (
+            target_normalized
+            .replace("dropdown", "")
+            .replace("drop-down", "")
+            .replace("select", "")
+            .replace("selector", "")
+            .replace("menu", "")
+            .strip()
+        )
+
+        target_words = [
+            word
+            for word in cleaned_target.split()
+            if word
+        ]
+
+        semantic_matches = []
+
+        for element in compatible_elements:
+            candidates = [
+                element.get("text", ""),
+                element.get("aria_label", ""),
+                element.get("placeholder", ""),
+                element.get("name", ""),
+                element.get("id", ""),
+            ]
+
+            candidate_text = " ".join(
+                str(value or "").lower()
+                for value in candidates
+            )
+
+            if target_words and all(
+                word in candidate_text
+                for word in target_words
+            ):
+                semantic_matches.append(element)
+
+        if len(semantic_matches) == 1:
+            return semantic_matches[0]
 
     for element in compatible_elements:
         candidates = [

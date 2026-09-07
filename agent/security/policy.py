@@ -7,6 +7,7 @@ MAX_TASK_RUNTIME_SECONDS = 120
 ALLOWED_ACTIONS = {
     "click",
     "type",
+    "select",
 }
 
 # Actions requiring explicit user confirmation
