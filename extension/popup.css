@@ -1,0 +1,482 @@
+/* =========================
+   AEGISAI POPUP UI
+========================= */
+
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+
+    --text: #1f2937;
+    --muted: #6b7280;
+    --subtle: #9ca3af;
+
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+
+    --success: #16a34a;
+}
+
+
+/* =========================
+   BODY
+========================= */
+
+body {
+    margin: 0;
+
+    width: 380px;
+
+    font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    background: var(--bg);
+    color: var(--text);
+}
+
+.app {
+    width: 100%;
+}
+
+
+/* =========================
+   HEADER
+========================= */
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 16px 18px;
+
+    background: var(--surface);
+
+    border-bottom: 1px solid var(--border);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+
+    gap: 10px;
+}
+
+
+/* LOGO */
+
+.brand-icon {
+    width: 40px;
+    height: 40px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    flex-shrink: 0;
+}
+
+.brand-icon img {
+    width: 100%;
+    height: 100%;
+
+    object-fit: contain;
+}
+
+
+/* BRAND TEXT */
+
+.brand-text h1 {
+    margin: 0;
+
+    font-size: 16px;
+    font-weight: 700;
+
+    letter-spacing: -0.3px;
+}
+
+.brand-text p {
+    margin: 3px 0 0;
+
+    font-size: 10.5px;
+
+    color: var(--muted);
+}
+
+
+/* PROTECTED STATUS */
+
+.protected {
+    display: flex;
+    align-items: center;
+
+    gap: 6px;
+
+    font-size: 10px;
+    font-weight: 600;
+
+    color: var(--success);
+}
+
+.protected-dot {
+    width: 7px;
+    height: 7px;
+
+    border-radius: 50%;
+
+    background: var(--success);
+}
+
+
+/* =========================
+   MAIN CONTENT
+========================= */
+
+.content {
+    padding: 16px 18px 18px;
+}
+
+
+/* =========================
+   SECTION HEADING
+========================= */
+
+.section-heading {
+    display: flex;
+    align-items: center;
+
+    gap: 10px;
+
+    margin-bottom: 16px;
+}
+
+.section-label {
+    font-size: 10px;
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    color: var(--muted);
+}
+
+.heading-line {
+    flex: 1;
+
+    height: 1px;
+
+    background: var(--border);
+}
+
+
+/* =========================
+   BROWSER TASK
+========================= */
+
+.task-area label {
+    display: block;
+
+    margin-bottom: 8px;
+
+    font-size: 13px;
+    font-weight: 650;
+}
+
+#task {
+    width: 100%;
+    height: 82px;
+
+    padding: 12px;
+
+    resize: none;
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+
+    background: var(--surface);
+
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+
+    color: var(--text);
+
+    outline: none;
+
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+
+#task::placeholder {
+    color: var(--subtle);
+}
+
+#task:focus {
+    border-color: var(--accent);
+
+    box-shadow:
+        0 0 0 3px rgba(37, 99, 235, 0.10);
+}
+
+
+/* =========================
+   RUN AGENT BUTTON
+========================= */
+
+#inspect {
+    width: 100%;
+
+    margin-top: 12px;
+
+    padding: 11px 14px;
+
+    border: none;
+    border-radius: 8px;
+
+    background: var(--accent);
+
+    color: white;
+
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 650;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s,
+        transform 0.1s;
+}
+
+#inspect:hover {
+    background: var(--accent-hover);
+}
+
+#inspect:active {
+    transform: scale(0.98);
+}
+
+.play-icon {
+    margin-right: 6px;
+
+    font-size: 10px;
+}
+
+
+/* =========================
+   DIVIDERS
+========================= */
+
+.section-divider {
+    height: 1px;
+
+    margin: 20px 0 16px;
+
+    background: var(--border);
+}
+
+
+/* =========================
+   AGENT PIPELINE
+========================= */
+
+.pipeline-section h2,
+.result-header h2 {
+    margin: 0 0 10px;
+
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.pipeline {
+    display: flex;
+    flex-direction: column;
+
+    gap: 3px;
+}
+
+.pipeline-step {
+    display: flex;
+    align-items: center;
+
+    gap: 10px;
+
+    padding: 7px 4px;
+
+    border-radius: 6px;
+
+    transition: background 0.2s;
+}
+
+.pipeline-step:hover {
+    background: #f1f5f9;
+}
+
+.step-icon {
+    width: 20px;
+
+    text-align: center;
+
+    font-size: 16px;
+
+    color: var(--subtle);
+}
+
+.step-name {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+
+/* PIPELINE STATES */
+
+.pipeline-step.active .step-icon {
+    color: var(--accent);
+}
+
+.pipeline-step.completed .step-icon {
+    color: var(--success);
+}
+
+.pipeline-step.completed {
+    background: rgba(22, 163, 74, 0.05);
+}
+
+
+/* =========================
+   RESULT
+========================= */
+
+.result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.private-status {
+    padding: 4px 7px;
+
+    border-radius: 5px;
+
+    background: #ecfdf5;
+
+    color: #15803d;
+
+    font-size: 9px;
+    font-weight: 650;
+}
+
+.result-box {
+    min-height: 72px;
+
+    padding: 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+
+    background: var(--surface);
+}
+
+#output {
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.result-placeholder {
+    display: flex;
+    flex-direction: column;
+
+    gap: 4px;
+
+    color: var(--muted);
+}
+
+.result-placeholder strong {
+    color: var(--text);
+
+    font-size: 12px;
+}
+
+
+/* =========================
+   SYSTEM STATUS
+========================= */
+
+.system-status {
+    margin-top: 2px;
+}
+
+.status-grid {
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+
+    gap: 8px;
+
+    margin-top: 10px;
+}
+
+.status-item {
+    padding: 9px;
+
+    border: 1px solid var(--border);
+    border-radius: 7px;
+
+    background: var(--surface);
+}
+
+.status-item strong {
+    display: block;
+
+    margin-bottom: 3px;
+
+    font-size: 11px;
+}
+
+.status-item span {
+    font-size: 9px;
+
+    line-height: 1.35;
+
+    color: var(--muted);
+}
+
+
+/* =========================
+   FOOTER
+========================= */
+
+.footer {
+    display: flex;
+    align-items: center;
+
+    gap: 7px;
+
+    margin-top: 16px;
+    padding-top: 13px;
+
+    border-top: 1px solid var(--border);
+
+    font-size: 9.5px;
+
+    color: var(--muted);
+}
+
+.footer-dot {
+    width: 6px;
+    height: 6px;
+
+    flex-shrink: 0;
+
+    border-radius: 50%;
+
+    background: var(--success);
+}

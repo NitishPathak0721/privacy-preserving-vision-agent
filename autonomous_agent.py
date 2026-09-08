@@ -309,15 +309,20 @@ STRICT RULES:
 9. Use CLICK only for buttons or links.
 10. Use TYPE only for input or textarea elements.
 11. Do not perform prerequisite actions unless explicitly required.
-12. Do not fill forms automatically.
-13. If the goal is already complete, return [].
-14. If required information is missing, return [].
-15. Do not repeat a successfully completed action unless the current page state requires it.
-16. Use the TASK CONSTRAINT as a hard restriction.
-17. Minimize actions.
-18. For click-only tasks, output exactly one CLICK action for the requested target.
-19. For type-only tasks, output exactly one TYPE action for the requested target and exact user-provided value.
-20. For general tasks, output only the single NEXT action required.
+12. Fill forms only when the user explicitly requests form filling and explicitly provides the values.
+13. For form filling, perform exactly ONE field action at a time.
+14. Never invent names, emails, phone numbers, addresses, dates, passwords, tokens, or other form values.
+15. Never type into credential/password fields.
+16. Use SELECT for HTML select/dropdown elements.
+17. If the goal is already complete, return [].
+18. If a required value is missing from the user goal, return [] instead of guessing.
+19. Do not repeat a successfully completed action unless the current page state requires it.
+20. Use the TASK CONSTRAINT as a hard restriction.
+21. Minimize actions.
+22. For click-only tasks, output exactly one CLICK action for the requested target.
+23. For type-only tasks, output exactly one TYPE action for the requested target and exact user-provided value.
+24. For explicit form-filling tasks, output exactly one TYPE or SELECT action for the next unfilled field.
+25. For general tasks, output only the single NEXT action required.
 
 Return [] only when the goal is complete or cannot safely continue.
 """

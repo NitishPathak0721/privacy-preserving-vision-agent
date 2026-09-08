@@ -932,153 +932,182 @@ def find_matching_element(
     target,
     element_kind=None,
 ):
-    if not isinstance(
-        target,
-        str,
-    ):
+    target_text = str(target or "").strip().lower()
+
+    if not target_text:
         return None
 
-    target_normalized = target.strip().lower()
+    normalized_target = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        target_text,
+    ).strip()
 
-    if not target_normalized:
-        return None
+    target_words = normalized_target.split()
 
-    # Restrict matching by the action that will use the element.
-    def is_compatible(element):
-        if not isinstance(
-            element,
-            dict,
-        ):
+    def tag_name(element):
+        return str(
+            element.get("type")
+            or element.get("tag")
+            or ""
+        ).lower()
+
+    def compatible(element):
+        tag = tag_name(element)
+        input_type = str(
+            element.get("input_type") or ""
+        ).lower()
+
+        if input_type == "password":
             return False
 
-        tag = str(
-            element.get("tag", "")
-        ).strip().lower()
-
-        input_type = str(
-            element.get("input_type", "")
-        ).strip().lower()
-
         if element_kind == "type":
-            return (
-                tag in {
-                    "input",
-                    "textarea",
-                }
-                and input_type != "password"
-            )
-
-        if element_kind == "click":
-            return tag in {
-                "button",
-                "a",
-            }
+            return tag in {"input", "textarea"}
 
         if element_kind == "select":
             return tag == "select"
 
-        return True
+        if element_kind == "click":
+            return tag in {"button", "a"}
 
-    compatible_elements = [
+        return tag in {
+            "button",
+            "input",
+            "textarea",
+            "select",
+            "a",
+        }
+
+    candidates = [
         element
         for element in elements
-        if is_compatible(element)
+        if compatible(element)
     ]
 
-    if element_kind == "select":
-        cleaned_target = (
-            target_normalized
-            .replace("dropdown", "")
-            .replace("drop-down", "")
-            .replace("select", "")
-            .replace("selector", "")
-            .replace("menu", "")
-            .strip()
+    if not candidates:
+        return None
+
+    def values(element):
+        return [
+            str(element.get("text") or "").strip().lower(),
+            str(element.get("aria_label") or "").strip().lower(),
+            str(element.get("placeholder") or "").strip().lower(),
+            str(element.get("name") or "").strip().lower(),
+            str(element.get("id") or "").strip().lower(),
+            str(element.get("label") or "").strip().lower(),
+        ]
+
+    # Exact field-name match.
+    for element in candidates:
+        if target_text in values(element):
+            return element
+
+    # Normalized semantic match.
+    scored = []
+
+    for element in candidates:
+        combined = " ".join(values(element))
+        normalized = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            combined,
+        ).strip()
+
+        score = 0
+
+        if normalized_target == normalized:
+            score += 100
+
+        for word in target_words:
+            if word in normalized.split():
+                score += 20
+            elif word in normalized:
+                score += 5
+
+        if score:
+            scored.append((score, element))
+
+    if scored:
+        scored.sort(
+            key=lambda item: item[0],
+            reverse=True,
         )
 
-        target_words = [
-            word
-            for word in cleaned_target.split()
-            if word
+        best_score = scored[0][0]
+        best = [
+            element
+            for score, element in scored
+            if score == best_score
         ]
 
-        semantic_matches = []
+        if len(best) == 1:
+            return best[0]
 
-        for element in compatible_elements:
-            candidates = [
-                element.get("text", ""),
-                element.get("aria_label", ""),
-                element.get("placeholder", ""),
-                element.get("name", ""),
-                element.get("id", ""),
-            ]
+    # Common form-field aliases.
+    aliases = {
+        "name": {
+            "name",
+            "full name",
+            "fullname",
+            "your name",
+        },
+        "country": {
+            "country",
+            "nation",
+        },
+        "email": {
+            "email",
+            "email address",
+            "e-mail",
+        },
+        "phone": {
+            "phone",
+            "phone number",
+            "mobile",
+            "mobile number",
+        },
+    }
 
-            candidate_text = " ".join(
-                str(value or "").lower()
-                for value in candidates
-            )
+    normalized_alias_target = normalized_target
 
-            if target_words and all(
-                word in candidate_text
-                for word in target_words
+    for names in aliases.values():
+        normalized_names = {
+            re.sub(
+                r"[^a-z0-9]+",
+                " ",
+                name,
+            ).strip()
+            for name in names
+        }
+
+        if normalized_alias_target not in normalized_names:
+            continue
+
+        matches = []
+
+        for element in candidates:
+            field_text = " ".join(values(element))
+            normalized_field = re.sub(
+                r"[^a-z0-9]+",
+                " ",
+                field_text,
+            ).strip()
+
+            if any(
+                name in normalized_field
+                for name in normalized_names
             ):
-                semantic_matches.append(element)
+                matches.append(element)
 
-        if len(semantic_matches) == 1:
-            return semantic_matches[0]
+        if len(matches) == 1:
+            return matches[0]
 
-    for element in compatible_elements:
-        candidates = [
-            element.get("text", ""),
-            element.get("aria_label", ""),
-            element.get("placeholder", ""),
-            element.get("name", ""),
-            element.get("id", ""),
-        ]
-
-        for candidate in candidates:
-            if (
-                isinstance(
-                    candidate,
-                    str,
-                )
-                and candidate.strip().lower()
-                == target_normalized
-            ):
-                return element
-
-    for element in compatible_elements:
-        candidates = [
-            element.get("text", ""),
-            element.get("aria_label", ""),
-            element.get("placeholder", ""),
-            element.get("name", ""),
-            element.get("id", ""),
-        ]
-
-        for candidate in candidates:
-            if not isinstance(
-                candidate,
-                str,
-            ):
-                continue
-
-            candidate_normalized = (
-                candidate.strip().lower()
-            )
-
-            if (
-                target_normalized
-                in candidate_normalized
-                or candidate_normalized
-                in target_normalized
-            ):
-                return element
+    # Single compatible field fallback.
+    if len(candidates) == 1:
+        return candidates[0]
 
     return None
 
-
-# Extract an explicit click target from the user task.
 def extract_click_target(task):
     if not isinstance(
         task,

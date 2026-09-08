@@ -2,26 +2,55 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Select Action Test</title>
+    <title>Form Fill Test</title>
 </head>
 <body>
-    <h1>Browser Agent Select Test</h1>
+    <h1>Browser Agent Form Fill Test</h1>
 
-    <label for="country">Country</label>
-    <select id="country" name="country">
-        <option value="">Select country</option>
-        <option value="india">India</option>
-        <option value="usa">United States</option>
-        <option value="uk">United Kingdom</option>
-        <option value="japan">Japan</option>
-    </select>
+    <form id="test-form">
+        <div>
+            <label for="name">Name</label>
+            <input
+                type="text"
+                id="name"
+                name="name"
+                placeholder="Enter your name"
+            >
+        </div>
+
+        <br>
+
+        <div>
+            <label for="country">Country</label>
+            <select id="country" name="country">
+                <option value="">Select country</option>
+                <option value="india">India</option>
+                <option value="usa">United States</option>
+                <option value="uk">United Kingdom</option>
+                <option value="japan">Japan</option>
+            </select>
+        </div>
+
+        <br>
+
+        <button type="button" id="check">
+            Check Form
+        </button>
+    </form>
 
     <p id="result"></p>
 
     <script>
-        document.getElementById("country").addEventListener("change", function () {
+        document.getElementById("check").addEventListener("click", function () {
+            const name = document.getElementById("name").value;
+            const country =
+                document.getElementById("country")
+                    .options[
+                        document.getElementById("country").selectedIndex
+                    ].text;
+
             document.getElementById("result").textContent =
-                "Selected: " + this.options[this.selectedIndex].text;
+                "Name: " + name + " | Country: " + country;
         });
     </script>
 </body>
