@@ -122,6 +122,120 @@ function findTarget(target) {
         )
     );
 
+    const targetLower =
+        normalizedTarget.toLowerCase();
+
+    // Resolve select/dropdown targets.
+    if (
+        /\b(dropdown|drop-down|select|selector|menu)\b/i.test(
+            targetLower
+        )
+    ) {
+        const selectCandidates =
+            elements.filter(
+                (element) =>
+                    element.tagName.toLowerCase() === "select"
+            );
+
+        const cleanedTarget =
+            targetLower
+                .replace(
+                    /\b(dropdown|drop-down|select|selector|menu)\b/gi,
+                    " "
+                )
+                .replace(
+                    /[^a-z0-9]+/g,
+                    " "
+                )
+                .trim();
+
+        const targetWords =
+            cleanedTarget
+                .split(/\s+/)
+                .filter(Boolean);
+
+        const matches =
+            selectCandidates.filter((element) => {
+                const label =
+                    element.labels?.length
+                        ? Array.from(element.labels)
+                              .map(
+                                  (item) =>
+                                      item.innerText || ""
+                              )
+                              .join(" ")
+                        : "";
+
+                const values = [
+                    element.getAttribute("name") || "",
+                    element.id || "",
+                    element.getAttribute("aria-label") || "",
+                    element.getAttribute("placeholder") || "",
+                    label,
+                    element.innerText || ""
+                ]
+                    .join(" ")
+                    .toLowerCase()
+                    .replace(
+                        /[^a-z0-9]+/g,
+                        " "
+                    );
+
+                return (
+                    targetWords.length > 0 &&
+                    targetWords.every(
+                        (word) =>
+                            values.includes(word)
+                    )
+                );
+            });
+
+        if (matches.length === 1) {
+            return matches[0];
+        }
+
+        // Direct fallback for a single visible select.
+        if (
+            selectCandidates.length === 1 &&
+            (
+                cleanedTarget === "" ||
+                targetWords.length > 0
+            )
+        ) {
+            const element =
+                selectCandidates[0];
+
+            const label =
+                element.labels?.length
+                    ? Array.from(element.labels)
+                          .map(
+                              (item) =>
+                                  item.innerText || ""
+                          )
+                          .join(" ")
+                    : "";
+
+            const values = [
+                element.getAttribute("name") || "",
+                element.id || "",
+                element.getAttribute("aria-label") || "",
+                label,
+                element.innerText || ""
+            ]
+                .join(" ")
+                .toLowerCase();
+
+            if (
+                targetWords.some(
+                    (word) =>
+                        values.includes(word)
+                )
+            ) {
+                return element;
+            }
+        }
+    }
+
     // Prefer editable fields for type actions described as fields.
     const fieldWords =
         /\b(field|input|textbox|text box)\b/i.test(
@@ -130,11 +244,11 @@ function findTarget(target) {
 
     if (fieldWords) {
         const fieldCandidates =
-            elements.filter((element) => {
-                return element.matches(
+            elements.filter((element) =>
+                element.matches(
                     "input:not([type='password']), textarea"
-                );
-            });
+                )
+            );
 
         const targetWords =
             normalizedTarget
@@ -166,86 +280,25 @@ function findTarget(target) {
                 return semanticMatches[0];
             }
         }
-
-        // Match common natural-language field names.
-        const lowerTarget =
-            normalizedTarget.toLowerCase();
-
-        const semanticFieldMatches =
-            fieldCandidates.filter((element) => {
-                const values = [
-                    element.getAttribute("name") || "",
-                    element.id || "",
-                    element.getAttribute("placeholder") || "",
-                    element.getAttribute("aria-label") || ""
-                ]
-                    .join(" ")
-                    .toLowerCase();
-
-                if (
-                    lowerTarget.includes("name") &&
-                    /\bname\b/.test(values)
-                ) {
-                    return true;
-                }
-
-                if (
-                    lowerTarget.includes("email") &&
-                    /\bemail\b/.test(values)
-                ) {
-                    return true;
-                }
-
-                if (
-                    lowerTarget.includes("phone") &&
-                    /\b(phone|mobile|telephone)\b/.test(values)
-                ) {
-                    return true;
-                }
-
-                if (
-                    lowerTarget.includes("search") &&
-                    /\bsearch\b/.test(values)
-                ) {
-                    return true;
-                }
-
-                return false;
-            });
-
-        if (semanticFieldMatches.length === 1) {
-            return semanticFieldMatches[0];
-        }
     }
 
-    // Try exact matches first.
-    const exactMatches = elements.filter((element) => {
-        const text =
-            (element.innerText || "").trim();
+    // Exact semantic match.
+    const exactMatches =
+        elements.filter((element) => {
+            const values = [
+                element.innerText || "",
+                element.getAttribute("aria-label") || "",
+                element.getAttribute("placeholder") || "",
+                element.getAttribute("name") || "",
+                element.id || ""
+            ];
 
-        const ariaLabel =
-            element.getAttribute("aria-label") || "";
-
-        const placeholder =
-            element.getAttribute("placeholder") || "";
-
-        const name =
-            element.getAttribute("name") || "";
-
-        const id =
-            element.id || "";
-
-        return [
-            text,
-            ariaLabel,
-            placeholder,
-            name,
-            id
-        ].some(
-            (value) =>
-                value === normalizedTarget
-        );
-    });
+            return values.some(
+                (value) =>
+                    value.trim().toLowerCase() ===
+                    targetLower
+            );
+        });
 
     if (exactMatches.length === 1) {
         return exactMatches[0];
@@ -396,7 +449,8 @@ async function executeAction(action) {
 
     if (
         actionType !== "click" &&
-        actionType !== "type"
+        actionType !== "type" &&
+        actionType !== "select"
     ) {
         return {
             success: false,
@@ -421,6 +475,91 @@ async function executeAction(action) {
             success: false,
             error:
                 `Target is disabled: ${action.target}`
+        };
+    }
+
+    if (actionType === "select") {
+        if (
+            typeof action.value !== "string"
+        ) {
+            return {
+                success: false,
+                error:
+                    "Select action requires a string value."
+            };
+        }
+
+        if (!target.matches("select")) {
+            return {
+                success: false,
+                error:
+                    "Select action requires a select element."
+            };
+        }
+
+        const options =
+            Array.from(target.options);
+
+        const requestedValue =
+            action.value.trim().toLowerCase();
+
+        const option =
+            options.find((item) =>
+                item.text.trim().toLowerCase() ===
+                requestedValue
+            ) ||
+            options.find((item) =>
+                item.value.trim().toLowerCase() ===
+                requestedValue
+            );
+
+        if (!option) {
+            return {
+                success: false,
+                error:
+                    `Could not find select option: ${action.value}`
+            };
+        }
+
+        const beforeValue =
+            target.value;
+
+        target.value =
+            option.value;
+
+        target.dispatchEvent(
+            new Event(
+                "input",
+                {
+                    bubbles: true
+                }
+            )
+        );
+
+        target.dispatchEvent(
+            new Event(
+                "change",
+                {
+                    bubbles: true
+                }
+            )
+        );
+
+        const verified =
+            target.value === option.value;
+
+        return {
+            success: verified,
+            action: "select",
+            target: action.target,
+            verification: {
+                success: verified,
+                before_value: beforeValue,
+                selected_value: option.value,
+                selected_text: option.text
+            },
+            post_action_state:
+                collectPageState()
         };
     }
 
@@ -524,6 +663,225 @@ async function executeAction(action) {
             verification,
         post_action_state:
             postState
+    };
+}
+
+// Run the synthetic banking login flow.
+async function demoLogin() {
+    const passwordInput =
+        document.querySelector('input[type="password"]');
+
+    const inputs =
+        Array.from(
+            document.querySelectorAll(
+                'input:not([type="password"])'
+            )
+        );
+
+    const usernameInput =
+        inputs.find((input) => {
+            const text = [
+                input.name,
+                input.id,
+                input.placeholder,
+                input.getAttribute("aria-label")
+            ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
+
+            return (
+                text.includes("user") ||
+                text.includes("customer") ||
+                text.includes("account") ||
+                text.includes("login") ||
+                text.includes("id")
+            );
+        }) || inputs[0];
+
+    if (!usernameInput || !passwordInput) {
+        return {
+            success: false,
+            error:
+                "Demo login fields could not be identified."
+        };
+    }
+
+    const setValue = (element, value) => {
+        const setter =
+            Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value"
+            )?.set;
+
+        if (setter) {
+            setter.call(element, value);
+        } else {
+            element.value = value;
+        }
+
+        element.dispatchEvent(
+            new Event("input", {
+                bubbles: true
+            })
+        );
+
+        element.dispatchEvent(
+            new Event("change", {
+                bubbles: true
+            })
+        );
+    };
+
+    setValue(
+        usernameInput,
+        "DEMO_USER_4821"
+    );
+
+    setValue(
+        passwordInput,
+        "Demo@4821"
+    );
+
+    const buttons =
+        Array.from(
+            document.querySelectorAll(
+                'button, input[type="submit"]'
+            )
+        );
+
+    const loginButton =
+        buttons.find((button) => {
+            const text = (
+                button.innerText ||
+                button.value ||
+                button.getAttribute("aria-label") ||
+                ""
+            )
+                .trim()
+                .toLowerCase();
+
+            return (
+                text.includes("login") ||
+                text.includes("sign in") ||
+                text.includes("log in")
+            );
+        });
+
+    if (!loginButton) {
+        return {
+            success: false,
+            error:
+                "Demo login button could not be identified."
+        };
+    }
+
+    loginButton.click();
+
+    return {
+        success: true,
+        action: "demo_login",
+        target: "Login"
+    };
+}
+
+// Open transaction history and extract the latest three transactions.
+async function demoTransactions() {
+    await new Promise((resolve) =>
+        setTimeout(resolve, 500)
+    );
+
+    const links =
+        Array.from(
+            document.querySelectorAll(
+                'a, button'
+            )
+        );
+
+    const transactionControl =
+        links.find((element) => {
+            const text = (
+                element.innerText ||
+                element.textContent ||
+                element.getAttribute("aria-label") ||
+                ""
+            )
+                .trim()
+                .toLowerCase();
+
+            return (
+                text.includes("transaction") ||
+                text.includes("history")
+            );
+        });
+
+    if (transactionControl) {
+        transactionControl.click();
+
+        await new Promise((resolve) =>
+            setTimeout(resolve, 800)
+        );
+    }
+
+    const rows =
+        Array.from(
+            document.querySelectorAll(
+                "table tbody tr"
+            )
+        );
+
+    let transactions = rows
+        .map((row) => {
+            const cells =
+                Array.from(
+                    row.querySelectorAll("td")
+                )
+                    .map((cell) =>
+                        cell.innerText.trim()
+                    )
+                    .filter(Boolean);
+
+            return cells;
+        })
+        .filter(
+            (cells) => cells.length > 0
+        )
+        .slice(0, 3);
+
+    if (transactions.length === 0) {
+        const cards =
+            Array.from(
+                document.querySelectorAll(
+                    '[class*="transaction"], [class*="Transaction"]'
+                )
+            );
+
+        transactions = cards
+            .map((card) =>
+                card.innerText
+                    .trim()
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+            )
+            .filter(
+                (lines) => lines.length > 0
+            )
+            .slice(0, 3);
+    }
+
+    if (transactions.length === 0) {
+        return {
+            success: false,
+            error:
+                "Transaction history could not be identified."
+        };
+    }
+
+    return {
+        success: true,
+        action: "demo_transactions",
+        transactions: transactions
     };
 }
 

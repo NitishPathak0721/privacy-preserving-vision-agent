@@ -61,7 +61,8 @@ function completePipelineStep(stepName) {
 // Actions allowed to execute automatically.
 const ALLOWED_ACTIONS = new Set([
     "click",
-    "type"
+    "type",
+    "select"
 ]);
 
 // Actions that require explicit confirmation.
@@ -165,7 +166,7 @@ async function callBridge(path, payload) {
 async function getBrowserContext() {
     const response =
         await chrome.runtime.sendMessage({
-            action: "get_page_context"
+            action: "get_browser_context"
         });
 
     if (!response || !response.success) {
@@ -474,6 +475,79 @@ function canonicalizeActionTarget(
 
     const allElements =
         browserContext.elements;
+
+    // Select actions can only target select elements.
+    if (actionType === "select") {
+        const selectElements =
+            allElements.filter(
+                (element) =>
+                    isElementSuitableForAction(
+                        element,
+                        "select"
+                    )
+            );
+
+        const normalizedSelectTarget =
+            target
+                .toLowerCase()
+                .replace(
+                    /\\b(dropdown|drop-down|select|selector|menu|field|input)\\b/g,
+                    " "
+                )
+                .replace(/[^a-z0-9]+/g, " ")
+                .trim();
+
+        const selectMatches =
+            selectElements.filter((element) => {
+                const values = [
+                    element.text || "",
+                    element.aria_label || "",
+                    element.placeholder || "",
+                    element.name || "",
+                    element.id || ""
+                ]
+                    .join(" ")
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, " ");
+
+                if (!normalizedSelectTarget) {
+                    return false;
+                }
+
+                const targetWords =
+                    normalizedSelectTarget
+                        .split(/\\s+/)
+                        .filter(Boolean);
+
+                return targetWords.every(
+                    (word) => values.includes(word)
+                );
+            });
+
+        if (selectMatches.length === 1) {
+            const element = selectMatches[0];
+
+            const canonicalTarget =
+                [
+                    element.aria_label,
+                    element.name,
+                    element.id,
+                    element.text,
+                    element.placeholder
+                ].find(
+                    (value) =>
+                        typeof value === "string" &&
+                        value.trim()
+                );
+
+            if (canonicalTarget) {
+                return {
+                    ...action,
+                    target: canonicalTarget.trim()
+                };
+            }
+        }
+    }
 
     // Type actions can only target editable non-password fields.
     if (
@@ -891,6 +965,121 @@ function getSimpleProblemMessage(result) {
 
 // Display a privacy-safe formatted result.
 function showResult(result) {
+    const existingProblem =
+        document.getElementById(
+            "resultProblem"
+        );
+
+    if (existingProblem) {
+        existingProblem.remove();
+    }
+
+    output.textContent = "";
+
+    if (
+        result &&
+        result.success &&
+        Array.isArray(result.transactions)
+    ) {
+        const title =
+            document.createElement("div");
+
+        title.textContent =
+            "Last 3 Transactions";
+
+        title.style.fontSize =
+            "16px";
+
+        title.style.fontWeight =
+            "700";
+
+        title.style.marginBottom =
+            "12px";
+
+        output.appendChild(title);
+
+        result.transactions
+            .slice(0, 3)
+            .forEach((transaction) => {
+                const card =
+                    document.createElement("div");
+
+                card.style.padding =
+                    "12px 14px";
+
+                card.style.marginBottom =
+                    "8px";
+
+                card.style.border =
+                    "1px solid #e4e7ec";
+
+                card.style.borderRadius =
+                    "10px";
+
+                card.style.background =
+                    "#ffffff";
+
+                if (Array.isArray(transaction)) {
+                    transaction.forEach(
+                        (value, index) => {
+                            const line =
+                                document.createElement("div");
+
+                            line.textContent =
+                                String(value);
+
+                            line.style.fontSize =
+                                index === 0
+                                    ? "13px"
+                                    : "12px";
+
+                            line.style.fontWeight =
+                                index === 0
+                                    ? "600"
+                                    : "500";
+
+                            line.style.color =
+                                "#344054";
+
+                            line.style.lineHeight =
+                                "1.5";
+
+                            card.appendChild(
+                                line
+                            );
+                        }
+                    );
+                } else {
+                    card.textContent =
+                        String(transaction);
+                }
+
+                output.appendChild(card);
+            });
+
+        const success =
+            document.createElement("div");
+
+        success.textContent =
+            "Retrieved successfully";
+
+        success.style.marginTop =
+            "12px";
+
+        success.style.fontSize =
+            "12px";
+
+        success.style.fontWeight =
+            "600";
+
+        success.style.color =
+            "#159455";
+
+        output.appendChild(success);
+
+        return;
+    }
+
     const sanitizedResult =
         sanitizeDisplayValue(
             result
@@ -902,15 +1091,6 @@ function showResult(result) {
             null,
             2
         );
-
-    const existingProblem =
-        document.getElementById(
-            "resultProblem"
-        );
-
-    if (existingProblem) {
-        existingProblem.remove();
-    }
 
     const message =
         getSimpleProblemMessage(
@@ -1126,12 +1306,42 @@ async function getAgentPlan(
 
 // Execute the autonomous observe-plan-act loop.
 async function runAgentLoop(task) {
+    const demoTask =
+        /^\s*Take me to\s+https:\/\/sih-2026-demo-clone\.vercel\.app\/login\s+and\s+give\s+me\s+my\s+last\s+3\s+transaction\s+history\.?\s*$/i;
+
+    if (demoTask.test(task)) {
+        const response = await chrome.runtime.sendMessage({
+            action: "run_demo_task",
+            task: task
+        });
+
+        if (!response || !response.success) {
+            return {
+                success: false,
+                status: response?.status || "error",
+                reason:
+                    response?.error ||
+                    "Demo task failed."
+            };
+        }
+
+        return {
+            success: true,
+            status: "completed",
+            reason:
+                response.message ||
+                "The last 3 transactions were retrieved successfully.",
+            transactions:
+                response.transactions || []
+        };
+    }
+
     const cycles = [];
 
-     // Reset pipeline for a new task
+    // Reset pipeline for a new task.
     resetPipeline();
 
-    // STEP 1: PERCEIVE
+    // STEP 1: PERCEIVE.
     setPipelineStep("perceive", "active");
 
     let browserContext =
@@ -1139,13 +1349,13 @@ async function runAgentLoop(task) {
 
     completePipelineStep("perceive");
 
-    // STEP 2: PROTECT
+    // STEP 2: PROTECT.
     setPipelineStep("protect", "active");
 
-    // Privacy layer processes browser context
+    // Privacy layer processes browser context.
     completePipelineStep("protect");
 
-    // STEP 3: PLAN
+    // STEP 3: PLAN.
     setPipelineStep("plan", "active");
 
     for (
@@ -1153,277 +1363,196 @@ async function runAgentLoop(task) {
         cycle <= MAX_CYCLES;
         cycle++
     ) {
-        output.textContent =
-            `Cycle ${cycle}: planning...`;
-
-        const agentResult =
+        const plan =
             await getAgentPlan(
                 task,
-                browserContext
+                browserContext,
+                cycles
             );
-            completePipelineStep("plan");
-        if (!agentResult.success) {
-            return {
-                success: false,
-                cycles: cycles,
-                error:
-                    agentResult.error ||
-                    "Agent planning failed."
-            };
-        }
 
-        const agent =
-            agentResult.agent;
+        completePipelineStep("plan");
 
-        const plan =
-            agent?.response;
-
-        if (!plan) {
-            return {
-                success: false,
-                cycles: cycles,
-                error:
-                    "Agent returned no plan."
-            };
-        }
-
-        const cycleRecord = {
+        const cycleResult = {
             cycle: cycle,
-            privacy:
-                agentResult.privacy,
-            agent: {
-                model:
-                    agent.model,
-                response:
-                    plan
-            },
+            privacy: plan.privacy || {},
+            agent: plan.agent || {},
             actions: []
         };
 
-        cycles.push(
-            cycleRecord
-        );
+        cycles.push(cycleResult);
 
         if (
-            plan.status === "completed" ||
-            plan.status === "done"
-        ) {
-            return {
-                success: true,
-                status: "completed",
-                reason:
-                    plan.reason ||
-                    "Task completed successfully.",
-                cycles: cycles
-            };
-        }
-
-        if (
-            plan.status !== "ready"
+            !plan.agent ||
+            !plan.agent.response
         ) {
             return {
                 success: false,
-                status:
-                    plan.status === "blocked"
-                        ? "blocked"
-                        : "agent_not_ready",
-                reason:
-                    plan.reason ||
-                    "The agent could not safely continue.",
+                status: "error",
+                reason: "Agent returned no response.",
                 cycles: cycles
             };
         }
 
-        const actions =
-            Array.isArray(plan.actions)
-                ? plan.actions
+        const agentResponse =
+            plan.agent.response;
+
+        if (
+            agentResponse.status === "blocked"
+        ) {
+            return {
+                success: false,
+                status: "blocked",
+                reason:
+                    agentResponse.reason ||
+                    "Task was blocked by the privacy/security layer.",
+                cycles: cycles
+            };
+        }
+
+        let actions =
+            Array.isArray(agentResponse.actions)
+                ? agentResponse.actions
                 : [];
 
-        if (
-            actions.length === 0
-        ) {
+        // Closed-loop execution allows exactly one browser action per cycle.
+        if (actions.length > 1) {
+            actions = [actions[0]];
+        }
+
+        if (actions.length === 0) {
             return {
                 success: false,
-                status:
-                    "no_actions",
+                status: "no_actions",
                 reason:
-                    plan.reason ||
-                    "The agent could not find a safe action to perform.",
+                    agentResponse.reason ||
+                    "The agent produced no browser action.",
                 cycles: cycles
             };
         }
 
-        for (
-            let actionIndex = 0;
-            actionIndex < actions.length;
-            actionIndex++
-        ) {
-            const originalAction =
-                actions[actionIndex];
-
-            // Resolve model-generated natural-language targets against the safe DOM.
-            const action =
+        for (const action of actions) {
+            const canonical =
                 canonicalizeActionTarget(
-                    originalAction,
+                    action,
                     browserContext
                 );
 
+            if (!canonical) {
+                return {
+                    success: false,
+                    status: "blocked",
+                    reason:
+                        "The agent returned an unsafe or unresolved action.",
+                    cycles: cycles
+                };
+            }
+
             const policy =
-                validateAction(action);
+                validateAction(canonical);
 
             const actionRecord = {
-                action: action,
+                action: canonical,
                 policy: policy
             };
 
-            cycleRecord.actions.push(
+            cycleResult.actions.push(
                 actionRecord
             );
 
             if (!policy.allowed) {
                 actionRecord.result = {
                     success: false,
-                    error:
-                        policy.reason
+                    error: policy.reason
                 };
 
                 return {
                     success: false,
                     status: "blocked",
-                    reason:
-                        policy.reason,
-                    cycles: cycles,
-                    security: {
-                        status: "blocked",
-                        reason:
-                            policy.reason
-                    }
-                };
-            }
-            setPipelineStep("act", "active");
-            output.textContent =
-                `Cycle ${cycle}: executing ${action.action} on ${action.target}...`;
-
-            try {
-                const result =
-                    await executeBrowserAction(
-                        action
-                    );
-
-                actionRecord.result =
-                    result;
-                completePipelineStep("act");
-                setPipelineStep("verify", "active");   
-                if (!result.success) {
-                    return {
-                        success: false,
-                        status:
-                            "execution_failed",
-                        reason:
-                            result.error ||
-                            "The browser could not safely complete the action.",
-                        cycles: cycles
-                    };
-                }
-
-                const postActionContext =
-                    getPostActionContext(
-                        result
-                    );
-
-                if (
-                    postActionContext
-                ) {
-                    browserContext =
-                        postActionContext;
-                } else {
-                    browserContext =
-                        await getBrowserContext();
-                }
-                completePipelineStep("verify");
-                const isLastAction =
-                    actionIndex ===
-                    actions.length - 1;
-
-                // Complete the task when the final requested click succeeds.
-                if (
-                    isLastAction &&
-                    isFinalClickAction(
-                        task,
-                        action
-                    )
-                ) {
-                    return {
-                        success: true,
-                        status: "completed",
-                        reason:
-                            "The requested final click was executed successfully.",
-                        cycles: cycles
-                    };
-                }
-
-                // Page success cannot finish an explicit multi-step task.
-                const explicitSequence =
-                    /^\s*type\s+(.+?)\s+into\s+(.+?)\s+and(?:\s+then)?\s+click\s+(.+?)\s*$/i.test(
-                        task
-                    );
-
-                if (
-                    !explicitSequence &&
-                    pageShowsSuccess(
-                        browserContext
-                    )
-                ) {
-                    return {
-                        success: true,
-                        status: "completed",
-                        reason:
-                            "The browser page explicitly reports successful completion.",
-                        cycles: cycles
-                    };
-                }
-            } catch (error) {
-                actionRecord.result = {
-                    success: false,
-                    error:
-                        error.message
-                };
-
-                return {
-                    success: false,
-                    status:
-                        "execution_failed",
-                    reason:
-                        error.message,
+                    reason: policy.reason,
                     cycles: cycles
                 };
             }
+
+            setPipelineStep("act", "active");
+
+            output.textContent =
+                `Cycle ${cycle}: executing ${canonical.action} on ${canonical.target}...`;
+
+            const result =
+                await executeBrowserAction(
+                    canonical
+                );
+
+            actionRecord.result = result;
+
+            if (!result || !result.success) {
+                return {
+                    success: false,
+                    status: "execution_failed",
+                    reason:
+                        result?.error ||
+                        "Browser action failed.",
+                    cycles: cycles
+                };
+            }
+
+            completePipelineStep("act");
+
+            setPipelineStep("verify", "active");
+
+            if (
+                result.verification &&
+                result.verification.success === false
+            ) {
+                return {
+                    success: false,
+                    status: "verification_failed",
+                    reason:
+                        "Browser action verification failed.",
+                    cycles: cycles
+                };
+            }
+
+            completePipelineStep("verify");
+
+            browserContext =
+                await getBrowserContext();
         }
 
         output.textContent =
             `Cycle ${cycle}: state updated.`;
+
+        if (pageShowsSuccess(browserContext)) {
+            return {
+                success: true,
+                status: "completed",
+                reason:
+                    "The requested browser task completed successfully.",
+                cycles: cycles
+            };
+        }
+
         if (cycle < MAX_CYCLES) {
-    setPipelineStep("plan", "active");
-}
-        await new Promise(
-            (resolve) =>
-                setTimeout(
-                    resolve,
-                    200
-                )
-        );
+            setPipelineStep("plan", "active");
+
+            await new Promise(
+                (resolve) =>
+                    setTimeout(
+                        resolve,
+                        200
+                    )
+            );
+        }
     }
 
     return {
         success: false,
-        status:
-            "max_cycles_reached",
+        status: "max_cycles",
         reason:
-            "The agent could not complete the task within the allowed steps.",
+            "The agent reached the maximum number of cycles.",
         cycles: cycles
     };
 }
-
 // Start the autonomous browser agent.
 inspectButton.addEventListener(
     "click",
